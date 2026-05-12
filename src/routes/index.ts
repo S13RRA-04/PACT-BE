@@ -18,6 +18,12 @@ export function createApiRouter(config: AppConfig) {
     try {
       const repository = await pactRepository(config);
       const response = await new LtiLaunchService(config, repository).handleLaunch(ltiLaunchSchema.parse(req.body).id_token);
+      if (acceptsHtml(req)) {
+        const target = new URL(config.pactWebBaseUrl);
+        target.hash = `sessionToken=${encodeURIComponent(response.sessionToken)}`;
+        res.redirect(303, target.toString());
+        return;
+      }
       res.status(200).json(response);
     } catch (error) {
       next(error);
@@ -35,7 +41,13 @@ export function createApiRouter(config: AppConfig) {
   router.post("/lti/deep-link", async (req, res, next) => {
     try {
       const repository = await pactRepository(config);
-      const html = await new DeepLinkingService(config, repository).createDeepLinkResponse(ltiDeepLinkSchema.parse(req.body).id_token);
+      const service = new DeepLinkingService(config, repository);
+      const idToken = ltiDeepLinkSchema.parse(req.body).id_token;
+      if (acceptsJson(req)) {
+        res.status(200).json(await service.createDeepLinkResponsePayload(idToken));
+        return;
+      }
+      const html = await service.createDeepLinkResponse(idToken);
       res.setHeader("content-type", "text/html; charset=utf-8");
       res.status(200).send(html);
     } catch (error) {
@@ -127,6 +139,16 @@ export function createApiRouter(config: AppConfig) {
   });
 
   return router;
+}
+
+function acceptsHtml(req: { headers: { accept?: string | string[] } }) {
+  const accept = Array.isArray(req.headers.accept) ? req.headers.accept.join(",") : req.headers.accept ?? "";
+  return accept.includes("text/html") && !accept.includes("application/json");
+}
+
+function acceptsJson(req: { headers: { accept?: string | string[] } }) {
+  const accept = Array.isArray(req.headers.accept) ? req.headers.accept.join(",") : req.headers.accept ?? "";
+  return accept.includes("application/json");
 }
 
 async function pactRepository(config: AppConfig) {

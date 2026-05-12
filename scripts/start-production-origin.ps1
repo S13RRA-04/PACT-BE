@@ -2,6 +2,7 @@ param(
   [string]$EnvFile = ".env.pact-origin-runtime",
   [int]$Port = 4200,
   [string]$PublicBaseUrl = "https://pact2-api.cetu.online",
+  [string]$PactWebBaseUrl = "https://pact2.cetu.online",
   [string]$LmsApiBaseUrl = "https://lms-api.cetu.online",
   [string]$FrontendOrigins = "https://pact2.cetu.online,https://lms.cetu.online"
 )
@@ -34,6 +35,7 @@ Import-DotEnv $EnvFile
 $env:NODE_ENV = "production"
 $env:PORT = $Port.ToString()
 $env:APP_BASE_URL = $PublicBaseUrl
+$env:PACT_WEB_BASE_URL = $PactWebBaseUrl
 $env:LMS_API_BASE_URL = $LmsApiBaseUrl
 $env:LMS_PLATFORM_ISSUER = $LmsApiBaseUrl
 $env:LMS_PLATFORM_JWKS_URI = "$LmsApiBaseUrl/api/v1/lti/jwks"

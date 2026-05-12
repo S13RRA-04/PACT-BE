@@ -32,6 +32,7 @@ beforeAll(async () => {
     env: "test",
     port: 4100,
     appBaseUrl: "http://localhost:4100",
+    pactWebBaseUrl: "http://pact.example.test",
     mongoUri: mongo.getUri(),
     mongoDbName: "PACT_TEST",
     mongoCollectionPrefix: "test_",
@@ -173,6 +174,23 @@ describe("PACT API", () => {
     expect(response.headers["content-type"]).toContain("text/html");
     expect(response.text).toContain("JWT");
     expect(response.text).toContain("http://lms.example.test/api/v1/lti/deep-linking/return");
+  });
+
+  it("returns a signed Deep Linking JSON payload for frontend relays", async () => {
+    const idToken = await signDeepLinkLaunch();
+
+    const response = await request(createApp(config, createLogger(config)))
+      .post("/api/v1/lti/deep-link")
+      .set("accept", "application/json")
+      .type("form")
+      .send({ id_token: idToken })
+      .expect(200);
+
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(response.body).toMatchObject({
+      returnUrl: "http://lms.example.test/api/v1/lti/deep-linking/return"
+    });
+    expect(response.body.jwt).toEqual(expect.any(String));
   });
 
   it("maps unavailable LMS JWKS to an explicit LTI platform error", async () => {

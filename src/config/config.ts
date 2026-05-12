@@ -15,6 +15,7 @@ const envSchema = z.object({
   LMS_PLATFORM_ISSUER: z.string().url(),
   LMS_PLATFORM_JWKS_URI: z.string().url(),
   LMS_DEEP_LINK_RETURN_URL: z.string().url(),
+  PACT_WEB_BASE_URL: z.string().url().optional(),
   PACT_LTI_CLIENT_ID: z.string().min(1),
   PACT_LTI_DEPLOYMENT_IDS: z.string().min(1),
   PACT_SESSION_SECRET: z.string().min(16),
@@ -35,6 +36,7 @@ export type AppConfig = {
   lmsPlatformIssuer: string;
   lmsPlatformJwksUri: string;
   lmsDeepLinkReturnUrl: string;
+  pactWebBaseUrl: string;
   pactLtiClientId: string;
   pactLtiDeploymentIds: string[];
   pactSessionSecret: string;
@@ -62,6 +64,7 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     lmsPlatformIssuer: parsed.LMS_PLATFORM_ISSUER.replace(/\/$/, ""),
     lmsPlatformJwksUri: parsed.LMS_PLATFORM_JWKS_URI,
     lmsDeepLinkReturnUrl: parsed.LMS_DEEP_LINK_RETURN_URL,
+    pactWebBaseUrl: (parsed.PACT_WEB_BASE_URL ?? parsed.APP_BASE_URL).replace(/\/$/, ""),
     pactLtiClientId: parsed.PACT_LTI_CLIENT_ID,
     pactLtiDeploymentIds: parsed.PACT_LTI_DEPLOYMENT_IDS.split(",").map((value) => value.trim()).filter(Boolean),
     pactSessionSecret: parsed.PACT_SESSION_SECRET,

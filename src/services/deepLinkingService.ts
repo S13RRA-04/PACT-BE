@@ -16,6 +16,11 @@ export class DeepLinkingService {
   constructor(private readonly config: AppConfig, private readonly repository: PactRepository) {}
 
   async createDeepLinkResponse(idToken: string) {
+    const response = await this.createDeepLinkResponsePayload(idToken);
+    return renderFormPost(response.returnUrl, { JWT: response.jwt });
+  }
+
+  async createDeepLinkResponsePayload(idToken: string) {
     const launch = await new LtiLaunchService(this.config, this.repository).verifyDeepLinkLaunch(idToken);
     const returnUrl = launch.deepLinkingSettings.deep_link_return_url;
 
@@ -49,7 +54,7 @@ export class DeepLinkingService {
       .setExpirationTime("5m")
       .sign(await importPKCS8(privateKey, "RS256"));
 
-    return renderFormPost(returnUrl, { JWT: jwt });
+    return { returnUrl, jwt };
   }
 }
 

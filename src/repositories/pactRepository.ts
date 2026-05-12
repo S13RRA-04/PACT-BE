@@ -9,14 +9,14 @@ export class PactRepository {
 
   async upsertUser(input: Omit<PactUser, "id" | "createdAt" | "updatedAt">) {
     const now = new Date().toISOString();
-    const existing = await this.users().findOne({ lmsUserId: input.lmsUserId, courseId: input.courseId });
+    const existing = await this.users().findOne({ lmsUserId: input.lmsUserId });
     const user: PactUser = {
       id: existing?.id ?? crypto.randomUUID(),
       ...input,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };
-    await this.users().updateOne({ lmsUserId: input.lmsUserId, courseId: input.courseId }, { $set: user }, { upsert: true });
+    await this.users().updateOne({ lmsUserId: input.lmsUserId }, { $set: user }, { upsert: true });
     return user;
   }
 
