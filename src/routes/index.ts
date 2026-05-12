@@ -5,8 +5,10 @@ import { currentSession, requirePactRole } from "../middleware/currentSession.js
 import { LmsAgsClient } from "../integrations/lmsAgsClient.js";
 import { PactRepository } from "../repositories/pactRepository.js";
 import { LtiLaunchService } from "../services/ltiLaunchService.js";
+import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
-import { contentCreateSchema, ltiLaunchSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { ToolKeyService } from "../services/toolKeyService.js";
+import { contentCreateSchema, ltiDeepLinkSchema, ltiLaunchSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 
 export function createApiRouter(config: AppConfig) {
@@ -17,6 +19,25 @@ export function createApiRouter(config: AppConfig) {
       const repository = await pactRepository(config);
       const response = await new LtiLaunchService(config, repository).handleLaunch(ltiLaunchSchema.parse(req.body).id_token);
       res.status(200).json(response);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/lti/jwks", async (_req, res, next) => {
+    try {
+      res.status(200).json(await new ToolKeyService(config).jwks());
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/lti/deep-link", async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      const html = await new DeepLinkingService(config, repository).createDeepLinkResponse(ltiDeepLinkSchema.parse(req.body).id_token);
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.status(200).send(html);
     } catch (error) {
       next(error);
     }

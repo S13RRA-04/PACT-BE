@@ -4,6 +4,10 @@ export const ltiLaunchSchema = z.object({
   id_token: z.string().min(1)
 });
 
+export const ltiDeepLinkSchema = z.object({
+  id_token: z.string().min(1)
+});
+
 export const squadCreateSchema = z.object({
   courseId: z.string().min(1),
   cohortId: z.string().min(1),

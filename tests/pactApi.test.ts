@@ -1,3 +1,5 @@
+import http from "node:http";
+import { exportJWK, exportPKCS8, generateKeyPair, SignJWT, type KeyLike } from "jose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,10 +10,24 @@ import { SessionService } from "../src/auth/sessionService.js";
 import { createLogger } from "../src/logging/logger.js";
 
 let mongo: MongoMemoryServer;
+let jwksServer: http.Server;
+let platformPrivateKey: KeyLike;
 let config: AppConfig;
 
 beforeAll(async () => {
   mongo = await MongoMemoryServer.create();
+  const platformKeys = await generateKeyPair("RS256");
+  platformPrivateKey = platformKeys.privateKey;
+  const platformPublicJwk = await exportJWK(platformKeys.publicKey);
+  const jwks = { keys: [{ ...platformPublicJwk, kid: "platform-key", alg: "RS256", use: "sig" }] };
+  jwksServer = http.createServer((_req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(jwks));
+  });
+  await new Promise<void>((resolve) => jwksServer.listen(0, "127.0.0.1", resolve));
+  const address = jwksServer.address();
+  if (typeof address !== "object" || !address) throw new Error("JWKS server did not start");
+  const pactKeys = await generateKeyPair("RS256");
   config = {
     env: "test",
     port: 4100,
@@ -21,10 +37,13 @@ beforeAll(async () => {
     mongoCollectionPrefix: "test_",
     lmsApiBaseUrl: "http://lms.example.test",
     lmsPlatformIssuer: "http://lms.example.test",
-    lmsPlatformJwksUri: "http://lms.example.test/jwks",
+    lmsPlatformJwksUri: `http://127.0.0.1:${address.port}/jwks`,
+    lmsDeepLinkReturnUrl: "http://lms.example.test/api/v1/lti/deep-linking/return",
     pactLtiClientId: "pact-tool",
     pactLtiDeploymentIds: ["deployment-1"],
     pactSessionSecret: "test-secret-with-enough-length",
+    pactToolKid: "pact-key",
+    pactToolPrivateKeyPem: await exportPKCS8(pactKeys.privateKey),
     corsOrigins: []
   };
   await ensureMongoCollections(config);
@@ -32,6 +51,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await mongo.stop();
+  await new Promise<void>((resolve, reject) => jwksServer.close((error) => (error ? reject(error) : resolve())));
 });
 
 describe("PACT API", () => {
@@ -92,7 +112,50 @@ describe("PACT API", () => {
 
     expect(response.body.entries[0]).toMatchObject({ userId: "user-1", totalScore: 8, maxScore: 10, progressPercent: 100 });
   });
+
+  it("returns a signed Deep Linking response form for LMS launches", async () => {
+    const idToken = await signDeepLinkLaunch();
+
+    const response = await request(createApp(config, createLogger(config)))
+      .post("/api/v1/lti/deep-link")
+      .type("form")
+      .send({ id_token: idToken })
+      .expect(200);
+
+    expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.text).toContain("JWT");
+    expect(response.text).toContain("http://lms.example.test/api/v1/lti/deep-linking/return");
+  });
+
+  it("publishes the PACT tool JWKS for LMS registration", async () => {
+    const response = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/lti/jwks")
+      .expect(200);
+
+    expect(response.body.keys[0]).toMatchObject({ kid: "pact-key", alg: "RS256", use: "sig" });
+  });
 });
+
+async function signDeepLinkLaunch() {
+  return new SignJWT({
+    "https://purl.imsglobal.org/spec/lti/claim/message_type": "LtiDeepLinkingRequest",
+    "https://purl.imsglobal.org/spec/lti/claim/version": "1.3.0",
+    "https://purl.imsglobal.org/spec/lti/claim/deployment_id": "deployment-1",
+    "https://purl.imsglobal.org/spec/lti/claim/context": { id: "cohort-a", title: "PACT" },
+    "https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings": {
+      deep_link_return_url: "http://lms.example.test/api/v1/lti/deep-linking/return",
+      accept_types: ["ltiResourceLink"],
+      accept_multiple: true
+    }
+  })
+    .setProtectedHeader({ alg: "RS256", kid: "platform-key" })
+    .setIssuer(config.lmsPlatformIssuer)
+    .setAudience(config.pactLtiClientId)
+    .setSubject("admin-1")
+    .setIssuedAt()
+    .setExpirationTime("5m")
+    .sign(platformPrivateKey);
+}
 
 function publishedContent(id: string, cohortId: string, role: "learner" | "admin") {
   const now = new Date().toISOString();

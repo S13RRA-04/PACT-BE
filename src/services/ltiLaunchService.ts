@@ -15,6 +15,13 @@ type LtiLaunchPayload = JWTPayload & {
   "https://purl.imsglobal.org/spec/lti/claim/roles"?: string[];
   "https://purl.imsglobal.org/spec/lti/claim/context"?: { id?: string; label?: string; title?: string };
   "https://purl.imsglobal.org/spec/lti/claim/custom"?: Record<string, string>;
+  "https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"?: {
+    deep_link_return_url?: string;
+    accept_types?: string[];
+    accept_presentation_document_targets?: string[];
+    accept_multiple?: boolean;
+    data?: string;
+  };
   "https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"?: {
     lineitems?: string;
     lineitem?: string;
@@ -33,10 +40,7 @@ export class LtiLaunchService {
   }
 
   async handleLaunch(idToken: string) {
-    const { payload } = await jwtVerify<LtiLaunchPayload>(idToken, this.jwks, {
-      issuer: this.config.lmsPlatformIssuer,
-      audience: this.config.pactLtiClientId
-    });
+    const payload = await this.verifyPlatformLaunch(idToken);
 
     if (payload["https://purl.imsglobal.org/spec/lti/claim/message_type"] !== "LtiResourceLinkRequest") {
       throw new AppError(400, "INVALID_LTI_MESSAGE", "Unsupported LTI message type");
@@ -80,6 +84,40 @@ export class LtiLaunchService {
       ags: payload["https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"],
       resourceLink: payload["https://purl.imsglobal.org/spec/lti/claim/resource_link"]
     };
+  }
+
+  async verifyDeepLinkLaunch(idToken: string) {
+    const payload = await this.verifyPlatformLaunch(idToken);
+
+    if (payload["https://purl.imsglobal.org/spec/lti/claim/message_type"] !== "LtiDeepLinkingRequest") {
+      throw new AppError(400, "INVALID_LTI_MESSAGE", "Unsupported LTI message type");
+    }
+
+    const deploymentId = payload["https://purl.imsglobal.org/spec/lti/claim/deployment_id"];
+    if (!deploymentId || !this.config.pactLtiDeploymentIds.includes(deploymentId)) {
+      throw new AppError(401, "INVALID_DEPLOYMENT", "LTI deployment is not trusted");
+    }
+
+    const deepLinkingSettings = payload["https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"];
+    if (!deepLinkingSettings?.deep_link_return_url) {
+      throw new AppError(400, "DEEP_LINK_RETURN_MISSING", "Deep Linking launch is missing return URL");
+    }
+
+    return {
+      payload,
+      deepLinkingSettings: {
+        ...deepLinkingSettings,
+        deep_link_return_url: deepLinkingSettings.deep_link_return_url
+      }
+    };
+  }
+
+  private async verifyPlatformLaunch(idToken: string) {
+    const { payload } = await jwtVerify<LtiLaunchPayload>(idToken, this.jwks, {
+      issuer: this.config.lmsPlatformIssuer,
+      audience: this.config.pactLtiClientId
+    });
+    return payload;
   }
 }
 
