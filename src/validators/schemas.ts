@@ -31,6 +31,10 @@ export const contentCreateSchema = z.object({
   status: z.enum(["draft", "published", "archived"]).default("draft")
 });
 
+export const contentStatusUpdateSchema = z.object({
+  status: z.enum(["draft", "published", "archived"])
+});
+
 export const scoreSubmitSchema = z.object({
   contentId: z.string().min(1),
   score: z.number().nonnegative(),

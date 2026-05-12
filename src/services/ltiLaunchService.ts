@@ -1,4 +1,9 @@
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
+import {
+  createRemoteJWKSet,
+  errors as joseErrors,
+  jwtVerify,
+  type JWTPayload
+} from "jose";
 import type { AppConfig } from "../config/config.js";
 import type { PactRole } from "../domain/types.js";
 import { AppError } from "../errors/AppError.js";
@@ -113,11 +118,23 @@ export class LtiLaunchService {
   }
 
   private async verifyPlatformLaunch(idToken: string) {
-    const { payload } = await jwtVerify<LtiLaunchPayload>(idToken, this.jwks, {
-      issuer: this.config.lmsPlatformIssuer,
-      audience: this.config.pactLtiClientId
-    });
-    return payload;
+    try {
+      const { payload } = await jwtVerify<LtiLaunchPayload>(idToken, this.jwks, {
+        issuer: this.config.lmsPlatformIssuer,
+        audience: this.config.pactLtiClientId
+      });
+      return payload;
+    } catch (error) {
+      if (isPlatformJwksFailure(error)) {
+        throw new AppError(502, "LTI_PLATFORM_JWKS_UNAVAILABLE", "LMS LTI signing keys are temporarily unavailable");
+      }
+
+      if (error instanceof joseErrors.JOSEError) {
+        throw new AppError(401, "INVALID_LTI_TOKEN", "LTI launch token is invalid");
+      }
+
+      throw error;
+    }
   }
 }
 
@@ -126,4 +143,12 @@ function normalizeRole(roles: string[]): PactRole {
   if (joined.includes("administrator") || joined.includes("admin")) return "admin";
   if (joined.includes("instructor")) return "instructor";
   return "learner";
+}
+
+function isPlatformJwksFailure(error: unknown) {
+  if (error instanceof joseErrors.JWKSTimeout || error instanceof joseErrors.JWKSInvalid) {
+    return true;
+  }
+
+  return error instanceof joseErrors.JOSEError && error.message.toLowerCase().includes("json web key set");
 }

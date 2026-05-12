@@ -8,7 +8,7 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { contentCreateSchema, ltiDeepLinkSchema, ltiLaunchSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { contentCreateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 
 export function createApiRouter(config: AppConfig) {
@@ -53,6 +53,14 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/session", async (req, res, next) => {
+    try {
+      res.status(200).json(requireSession(req));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/scores", async (req, res, next) => {
     try {
       res.status(201).json(await pactService(config).then((service) => service.submitScore(requireSession(req), scoreSubmitSchema.parse(req.body))));
@@ -91,6 +99,28 @@ export function createApiRouter(config: AppConfig) {
     try {
       const repository = await pactRepository(config);
       res.status(201).json(await repository.upsertContent(contentCreateSchema.parse(req.body)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/content", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json(await repository.listContentForManagement(requireSession(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch("/admin/content/:contentId/status", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json(await repository.updateContentStatus({
+        contentId: req.params.contentId,
+        status: contentStatusUpdateSchema.parse(req.body).status,
+        session: requireSession(req)
+      }));
     } catch (error) {
       next(error);
     }

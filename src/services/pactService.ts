@@ -19,6 +19,10 @@ export class PactService {
       throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this user");
     }
 
+    if (content.status !== "published") {
+      throw new AppError(403, "CONTENT_NOT_AVAILABLE", "Content is not available");
+    }
+
     if (input.score > (input.maxScore ?? content.maxScore)) {
       throw new AppError(400, "INVALID_SCORE", "Score cannot exceed max score");
     }

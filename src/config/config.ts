@@ -5,7 +5,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4100),
   APP_BASE_URL: z.string().url(),
   MONGO_URI: z.string().min(1),
-  MONGO_DB_NAME: z.string().min(1).default("CETU"),
+  MONGO_DB_NAME: z.string().min(1).default("PACT_V4"),
   MONGO_COLLECTION_PREFIX: z.string().optional(),
   LMS_API_BASE_URL: z.string().url(),
   LMS_PLATFORM_ISSUER: z.string().url(),

@@ -2,7 +2,7 @@ import type { Db } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 import { collectionName } from "../db/mongo.js";
 import { AppError } from "../errors/AppError.js";
-import type { ContentType, PactContent, PactRole, PactScore, PactUser, Squad } from "../domain/types.js";
+import type { ContentStatus, ContentType, PactContent, PactRole, PactScore, PactUser, Squad } from "../domain/types.js";
 
 export class PactRepository {
   constructor(private readonly db: Db, private readonly config: AppConfig) {}
@@ -67,10 +67,36 @@ export class PactRepository {
       .toArray();
   }
 
+  async listContentForManagement(session: { role: PactRole; courseId: string; cohortId: string }) {
+    const filter: Record<string, unknown> = { courseId: session.courseId };
+    if (session.role === "instructor") {
+      filter.$or = [{ cohortId: session.cohortId }, { cohortId: { $exists: false } }];
+    }
+
+    return this.content()
+      .find(filter)
+      .sort({ type: 1, title: 1 })
+      .toArray();
+  }
+
   async requireContent(contentId: string) {
     const content = await this.content().findOne({ id: contentId });
     if (!content) throw new AppError(404, "CONTENT_NOT_FOUND", "PACT content was not found");
     return content;
+  }
+
+  async updateContentStatus(input: { contentId: string; status: ContentStatus; session: { role: PactRole; courseId: string; cohortId: string } }) {
+    const content = await this.requireContent(input.contentId);
+    if (content.courseId !== input.session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this course");
+    }
+    if (input.session.role === "instructor" && content.cohortId && content.cohortId !== input.session.cohortId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this cohort");
+    }
+
+    const updatedAt = new Date().toISOString();
+    await this.content().updateOne({ id: input.contentId }, { $set: { status: input.status, updatedAt } });
+    return { ...content, status: input.status, updatedAt };
   }
 
   async upsertScore(input: {

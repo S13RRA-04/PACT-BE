@@ -113,6 +113,54 @@ describe("PACT API", () => {
     expect(response.body.entries[0]).toMatchObject({ userId: "user-1", totalScore: 8, maxScore: 10, progressPercent: 100 });
   });
 
+  it("lets admins and instructors gate module availability", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactContent").updateOne(
+      { id: "content-gated" },
+      { $set: publishedContent("content-gated", "cohort-a", "learner", "draft") },
+      { upsert: true }
+    );
+
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "user-1",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-a",
+      squadId: "squad-1"
+    });
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "instructor-1",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-a"
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/scores")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .send({ contentId: "content-gated", score: 8, maxScore: 10, progressPercent: 100 })
+      .expect(403);
+
+    const adminList = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/content")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .expect(200);
+
+    expect(adminList.body.some((item: { id: string; status: string }) => item.id === "content-gated" && item.status === "draft")).toBe(true);
+
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/admin/content/content-gated/status")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .send({ status: "published" })
+      .expect(200);
+
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/scores")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .send({ contentId: "content-gated", score: 8, maxScore: 10, progressPercent: 100 })
+      .expect(201);
+  });
+
   it("returns a signed Deep Linking response form for LMS launches", async () => {
     const idToken = await signDeepLinkLaunch();
 
@@ -125,6 +173,38 @@ describe("PACT API", () => {
     expect(response.headers["content-type"]).toContain("text/html");
     expect(response.text).toContain("JWT");
     expect(response.text).toContain("http://lms.example.test/api/v1/lti/deep-linking/return");
+  });
+
+  it("maps unavailable LMS JWKS to an explicit LTI platform error", async () => {
+    const failingJwksServer = http.createServer((_req, res) => {
+      res.statusCode = 500;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: "jwks unavailable" }));
+    });
+    await new Promise<void>((resolve) => failingJwksServer.listen(0, "127.0.0.1", resolve));
+    const address = failingJwksServer.address();
+    if (typeof address !== "object" || !address) throw new Error("Failing JWKS server did not start");
+
+    const badConfig = {
+      ...config,
+      lmsPlatformJwksUri: `http://127.0.0.1:${address.port}/jwks`
+    };
+    const idToken = await signDeepLinkLaunch();
+
+    try {
+      const response = await request(createApp(badConfig, createLogger(badConfig)))
+        .post("/api/v1/lti/deep-link")
+        .type("form")
+        .send({ id_token: idToken })
+        .expect(502);
+
+      expect(response.body.error).toMatchObject({
+        code: "LTI_PLATFORM_JWKS_UNAVAILABLE",
+        message: "LMS LTI signing keys are temporarily unavailable"
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => failingJwksServer.close((error) => (error ? reject(error) : resolve())));
+    }
   });
 
   it("publishes the PACT tool JWKS for LMS registration", async () => {
@@ -157,7 +237,7 @@ async function signDeepLinkLaunch() {
     .sign(platformPrivateKey);
 }
 
-function publishedContent(id: string, cohortId: string, role: "learner" | "admin") {
+function publishedContent(id: string, cohortId: string, role: "learner" | "admin", status = "published") {
   const now = new Date().toISOString();
   return {
     id,
@@ -168,7 +248,7 @@ function publishedContent(id: string, cohortId: string, role: "learner" | "admin
     title: id,
     prompt: "Answer the prompt",
     maxScore: 10,
-    status: "published",
+    status,
     createdAt: now,
     updatedAt: now
   };
