@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cetu-pact-api-staging",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-05-12",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "PACT_API_ORIGIN": "https://pact-api-origin-staging.example.com",
+    "CORS_ORIGINS": "https://cetu-pact-web-staging.pages.dev,https://pact-staging.cetu.online"
+  }
+}

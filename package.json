@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node dist/src/server.js",
     "db:ensure": "tsx src/db/ensureMongo.ts",
+    "deploy:worker:staging": "wrangler deploy",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
@@ -31,6 +32,7 @@
     "supertest": "^7.2.2",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.6",
+    "wrangler": "^4.90.1"
   }
 }
