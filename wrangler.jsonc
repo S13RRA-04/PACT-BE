@@ -8,7 +8,7 @@
     "head_sampling_rate": 1
   },
   "vars": {
-    "PACT_API_ORIGIN": "https://pact-api-origin-staging.example.com",
+    "PACT_API_ORIGIN": "https://pact-api-origin-staging.cetu.online",
     "CORS_ORIGINS": "https://cetu-pact-web-staging.pages.dev,https://pact-staging.cetu.online"
   }
 }

@@ -11,6 +11,11 @@ export async function getMongoDb(config: AppConfig): Promise<Db> {
   return client.db(config.mongoDbName);
 }
 
+export async function closeMongoClient() {
+  await client?.close();
+  client = undefined;
+}
+
 export function collectionName(config: AppConfig, name: string) {
   return `${config.mongoCollectionPrefix}${name}`;
 }

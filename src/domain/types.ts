@@ -34,6 +34,31 @@ export type PactContent = {
   prompt: string;
   maxScore: number;
   lineItemUrl?: string;
+  day?: string;
+  questionCount?: number;
+  questions?: PactQuestion[];
+  status: ContentStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PactQuestion = {
+  id: string;
+  version: number;
+  supersedes: string | null;
+  type: string;
+  day: string;
+  role: string;
+  topic: string;
+  tags: string[];
+  stem: Record<string, string>;
+  payload: Record<string, unknown>;
+  feedback: Record<string, unknown>;
+  scoring: {
+    points: number;
+    difficulty: string;
+    mustPass: boolean;
+  };
   status: ContentStatus;
   createdAt: string;
   updatedAt: string;

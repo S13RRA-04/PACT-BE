@@ -12,6 +12,25 @@ npm run db:ensure
 npm run dev
 ```
 
+## Importing PACT modules
+
+Question-bank JSON files can be imported as published PACT modules. Each source file becomes one `pactContent` module with the full validated question payload stored server-side.
+
+```powershell
+$env:DOTENV_CONFIG_PATH=".env.pact-origin-runtime"
+npm run modules:import -- --course-id pact `
+  "C:\Users\CETUAdmin1\Downloads\day1_lecture1_questions.json" `
+  "C:\Users\CETUAdmin1\Downloads\day1_lecture2_questions.json" `
+  "C:\Users\CETUAdmin1\Downloads\day2_lecture1_questions.json" `
+  "C:\Users\CETUAdmin1\Downloads\day2_lecture2_questions.json" `
+  "C:\Users\CETUAdmin1\Downloads\day3_lecture1_questions.json" `
+  "C:\Users\CETUAdmin1\Downloads\day4_lecture1_questions.json" `
+  "C:\Users\CETUAdmin1\Downloads\day4_lecture2_questions.json" `
+  "C:\Users\CETUAdmin1\Downloads\day5_capstone_questions.json"
+```
+
+Use `--cohort-id <cohort>` when modules should be scoped to a specific LMS cohort. The importer is idempotent and skips repeated question IDs.
+
 ## API surface
 
 - `POST /api/v1/lti/launch` validates an LMS `id_token`, syncs the PACT user, and returns a PACT session token.

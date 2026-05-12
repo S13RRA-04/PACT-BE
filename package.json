@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/server.js",
     "db:ensure": "tsx src/db/ensureMongo.ts",
+    "modules:import": "tsx src/content/importPactModules.ts",
     "deploy:worker:staging": "wrangler deploy",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit"
