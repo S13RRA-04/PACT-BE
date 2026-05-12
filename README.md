@@ -40,5 +40,7 @@ Use `--cohort-id <cohort>` when modules should be scoped to a specific LMS cohor
 - `POST /api/v1/admin/squads` creates squads for a course cohort.
 - `PATCH /api/v1/admin/users/:userId/squad` assigns a learner to a squad.
 - `POST /api/v1/admin/content` creates or updates PACT content.
+- `GET /api/v1/admin/content` lists course modules for administrator/instructor gating.
+- `PATCH /api/v1/admin/content/:contentId/status` changes a module between `draft`, `published`, and `archived`.
 
-Protected PACT endpoints use the bearer session token returned from LTI launch. Admin endpoints require a PACT session with `admin` role.
+Protected PACT endpoints use the bearer session token returned from LTI launch. Squad administration requires `admin`; content gating requires `admin` or `instructor`.

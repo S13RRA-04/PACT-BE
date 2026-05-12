@@ -1,11 +1,14 @@
-import { Db, MongoClient } from "mongodb";
+import { Db, MongoClient, type MongoClientOptions } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 
 let client: MongoClient | undefined;
 
 export async function getMongoDb(config: AppConfig): Promise<Db> {
   if (!client) {
-    client = new MongoClient(config.mongoUri);
+    const options: MongoClientOptions = config.mongoTlsCertKeyFile
+      ? { tlsCertificateKeyFile: config.mongoTlsCertKeyFile }
+      : {};
+    client = new MongoClient(config.mongoUri, options);
     await client.connect();
   }
   return client.db(config.mongoDbName);

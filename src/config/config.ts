@@ -4,9 +4,13 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4100),
   APP_BASE_URL: z.string().url(),
-  MONGO_URI: z.string().min(1),
-  MONGO_DB_NAME: z.string().min(1).default("PACT_V4"),
+  MONGO_URI: z.string().min(1).optional(),
+  MONGODB_URI: z.string().min(1).optional(),
+  MONGO_DB_NAME: z.string().min(1).optional(),
+  MONGODB_DB: z.string().min(1).optional(),
   MONGO_COLLECTION_PREFIX: z.string().optional(),
+  MONGO_TLS_CERT_KEY_FILE: z.string().optional(),
+  MONGODB_X509_CERT_PATH: z.string().optional(),
   LMS_API_BASE_URL: z.string().url(),
   LMS_PLATFORM_ISSUER: z.string().url(),
   LMS_PLATFORM_JWKS_URI: z.string().url(),
@@ -26,6 +30,7 @@ export type AppConfig = {
   mongoUri: string;
   mongoDbName: string;
   mongoCollectionPrefix: string;
+  mongoTlsCertKeyFile?: string;
   lmsApiBaseUrl: string;
   lmsPlatformIssuer: string;
   lmsPlatformJwksUri: string;
@@ -40,13 +45,19 @@ export type AppConfig = {
 
 export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
   const parsed = envSchema.parse(source);
+  const mongoUri = parsed.MONGODB_URI ?? parsed.MONGO_URI;
+  if (!mongoUri) {
+    throw new Error("MONGO_URI or MONGODB_URI is required");
+  }
+
   return {
     env: parsed.NODE_ENV,
     port: parsed.PORT,
     appBaseUrl: parsed.APP_BASE_URL.replace(/\/$/, ""),
-    mongoUri: parsed.MONGO_URI,
-    mongoDbName: parsed.MONGO_DB_NAME,
+    mongoUri,
+    mongoDbName: parsed.MONGODB_DB ?? parsed.MONGO_DB_NAME ?? "PACT_V4",
     mongoCollectionPrefix: parsed.MONGO_COLLECTION_PREFIX ?? (parsed.NODE_ENV === "production" ? "" : "pact_dev_"),
+    mongoTlsCertKeyFile: parsed.MONGODB_X509_CERT_PATH ?? parsed.MONGO_TLS_CERT_KEY_FILE,
     lmsApiBaseUrl: parsed.LMS_API_BASE_URL.replace(/\/$/, ""),
     lmsPlatformIssuer: parsed.LMS_PLATFORM_ISSUER.replace(/\/$/, ""),
     lmsPlatformJwksUri: parsed.LMS_PLATFORM_JWKS_URI,
