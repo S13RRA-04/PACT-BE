@@ -176,6 +176,27 @@ describe("PACT API", () => {
     expect(response.text).toContain("http://lms.example.test/api/v1/lti/deep-linking/return");
   });
 
+  it("accepts Deep Linked module launches and redirects to the frontend with a PACT session", async () => {
+    const idToken = await signResourceLaunch();
+
+    const response = await request(createApp(config, createLogger(config)))
+      .post("/launch/module")
+      .set("accept", "text/html")
+      .type("form")
+      .send({ id_token: idToken })
+      .expect(303);
+
+    expect(response.headers.location).toMatch(/^http:\/\/pact\.example\.test\/#sessionToken=/);
+
+    const db = await getMongoDb(config);
+    const user = await db.collection("test_pactUsers").findOne({ lmsUserId: "lms-user-launch" });
+    expect(user).toMatchObject({
+      courseId: "pact",
+      cohortId: "cohort-launch",
+      role: "learner"
+    });
+  });
+
   it("returns a signed Deep Linking JSON payload for frontend relays", async () => {
     const idToken = await signDeepLinkLaunch();
 
@@ -250,6 +271,26 @@ async function signDeepLinkLaunch() {
     .setIssuer(config.lmsPlatformIssuer)
     .setAudience(config.pactLtiClientId)
     .setSubject("admin-1")
+    .setIssuedAt()
+    .setExpirationTime("5m")
+    .sign(platformPrivateKey);
+}
+
+async function signResourceLaunch() {
+  return new SignJWT({
+    name: "Launch Learner",
+    email: "launch.learner@example.test",
+    "https://purl.imsglobal.org/spec/lti/claim/message_type": "LtiResourceLinkRequest",
+    "https://purl.imsglobal.org/spec/lti/claim/version": "1.3.0",
+    "https://purl.imsglobal.org/spec/lti/claim/deployment_id": "deployment-1",
+    "https://purl.imsglobal.org/spec/lti/claim/context": { id: "cohort-launch", label: "pact", title: "PACT" },
+    "https://purl.imsglobal.org/spec/lti/claim/roles": ["http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"],
+    "https://purl.imsglobal.org/spec/lti/claim/resource_link": { id: "pact-module-hub", title: "PACT Modules" }
+  })
+    .setProtectedHeader({ alg: "RS256", kid: "platform-key" })
+    .setIssuer(config.lmsPlatformIssuer)
+    .setAudience(config.pactLtiClientId)
+    .setSubject("lms-user-launch")
     .setIssuedAt()
     .setExpirationTime("5m")
     .sign(platformPrivateKey);

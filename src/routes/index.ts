@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import type { AppConfig } from "../config/config.js";
 import { getMongoDb } from "../db/mongo.js";
 import { currentSession, requirePactRole } from "../middleware/currentSession.js";
@@ -14,21 +14,7 @@ import { AppError } from "../errors/AppError.js";
 export function createApiRouter(config: AppConfig) {
   const router = Router();
 
-  router.post("/lti/launch", async (req, res, next) => {
-    try {
-      const repository = await pactRepository(config);
-      const response = await new LtiLaunchService(config, repository).handleLaunch(ltiLaunchSchema.parse(req.body).id_token);
-      if (acceptsHtml(req)) {
-        const target = new URL(config.pactWebBaseUrl);
-        target.hash = `sessionToken=${encodeURIComponent(response.sessionToken)}`;
-        res.redirect(303, target.toString());
-        return;
-      }
-      res.status(200).json(response);
-    } catch (error) {
-      next(error);
-    }
-  });
+  router.post("/lti/launch", ltiLaunchHandler(config));
 
   router.get("/lti/jwks", async (_req, res, next) => {
     try {
@@ -139,6 +125,24 @@ export function createApiRouter(config: AppConfig) {
   });
 
   return router;
+}
+
+export function ltiLaunchHandler(config: AppConfig) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repository = await pactRepository(config);
+      const response = await new LtiLaunchService(config, repository).handleLaunch(ltiLaunchSchema.parse(req.body).id_token);
+      if (acceptsHtml(req)) {
+        const target = new URL(config.pactWebBaseUrl);
+        target.hash = `sessionToken=${encodeURIComponent(response.sessionToken)}`;
+        res.redirect(303, target.toString());
+        return;
+      }
+      res.status(200).json(response);
+    } catch (error) {
+      next(error);
+    }
+  };
 }
 
 function acceptsHtml(req: { headers: { accept?: string | string[] } }) {

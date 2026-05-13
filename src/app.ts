@@ -5,7 +5,7 @@ import pinoHttp from "pino-http";
 import type { AppConfig } from "./config/config.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { requestId } from "./middleware/requestId.js";
-import { createApiRouter } from "./routes/index.js";
+import { createApiRouter, ltiLaunchHandler } from "./routes/index.js";
 import type { AppLogger } from "./logging/logger.js";
 
 export function createApp(config: AppConfig, logger: AppLogger) {
@@ -22,6 +22,7 @@ export function createApp(config: AppConfig, logger: AppLogger) {
     res.status(200).json({ ok: true, service: "pact-api" });
   });
 
+  app.post("/launch/:contentType", ltiLaunchHandler(config));
   app.use("/api/v1", createApiRouter(config));
   app.use(errorHandler(logger));
   return app;
