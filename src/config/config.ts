@@ -6,11 +6,11 @@ const envSchema = z.object({
   APP_BASE_URL: z.string().url(),
   MONGO_URI: z.string().min(1).optional(),
   MONGODB_URI: z.string().min(1).optional(),
+  MONGO_USERNAME: z.string().min(1).optional(),
+  MONGO_PASSWORD: z.string().min(1).optional(),
   MONGO_DB_NAME: z.string().min(1).optional(),
   MONGODB_DB: z.string().min(1).optional(),
   MONGO_COLLECTION_PREFIX: z.string().optional(),
-  MONGO_TLS_CERT_KEY_FILE: z.string().optional(),
-  MONGODB_X509_CERT_PATH: z.string().optional(),
   LMS_API_BASE_URL: z.string().url(),
   LMS_PLATFORM_ISSUER: z.string().url(),
   LMS_PLATFORM_JWKS_URI: z.string().url(),
@@ -31,7 +31,6 @@ export type AppConfig = {
   mongoUri: string;
   mongoDbName: string;
   mongoCollectionPrefix: string;
-  mongoTlsCertKeyFile?: string;
   lmsApiBaseUrl: string;
   lmsPlatformIssuer: string;
   lmsPlatformJwksUri: string;
@@ -47,10 +46,12 @@ export type AppConfig = {
 
 export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
   const parsed = envSchema.parse(source);
-  const mongoUri = parsed.MONGODB_URI ?? parsed.MONGO_URI;
-  if (!mongoUri) {
+  const configuredMongoUri = parsed.MONGODB_URI ?? parsed.MONGO_URI;
+  if (!configuredMongoUri) {
     throw new Error("MONGO_URI or MONGODB_URI is required");
   }
+  const mongoUri = buildMongoUri(configuredMongoUri, parsed.MONGO_USERNAME, parsed.MONGO_PASSWORD);
+  assertWorkerCompatibleMongoUri(mongoUri, parsed.NODE_ENV);
 
   return {
     env: parsed.NODE_ENV,
@@ -59,7 +60,6 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     mongoUri,
     mongoDbName: parsed.MONGODB_DB ?? parsed.MONGO_DB_NAME ?? "PACT_V4",
     mongoCollectionPrefix: parsed.MONGO_COLLECTION_PREFIX ?? (parsed.NODE_ENV === "production" ? "" : "pact_dev_"),
-    mongoTlsCertKeyFile: parsed.MONGODB_X509_CERT_PATH ?? parsed.MONGO_TLS_CERT_KEY_FILE,
     lmsApiBaseUrl: parsed.LMS_API_BASE_URL.replace(/\/$/, ""),
     lmsPlatformIssuer: parsed.LMS_PLATFORM_ISSUER.replace(/\/$/, ""),
     lmsPlatformJwksUri: parsed.LMS_PLATFORM_JWKS_URI,
@@ -72,4 +72,29 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     pactToolPrivateKeyPem: parsed.PACT_TOOL_PRIVATE_KEY_PEM?.replace(/\\n/g, "\n"),
     corsOrigins: parsed.CORS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
   };
+}
+
+function buildMongoUri(mongoUri: string, username?: string, password?: string) {
+  if (!username && !password) {
+    return mongoUri;
+  }
+
+  if (!username || !password) {
+    throw new Error("MONGO_USERNAME and MONGO_PASSWORD must both be set when either one is provided.");
+  }
+
+  return mongoUri.replace(
+    /^(mongodb(?:\+srv)?:\/\/)(?:[^@/?]+@)?(.+)$/i,
+    (_match, prefix: string, rest: string) => `${prefix}${encodeURIComponent(username)}:${encodeURIComponent(password)}@${rest}`
+  );
+}
+
+function assertWorkerCompatibleMongoUri(mongoUri: string, nodeEnv: "development" | "test" | "production") {
+  if (/authMechanism=MONGODB-X509|authMechanism=%24external|authSource=%24external/i.test(mongoUri)) {
+    throw new Error("MONGO_URI must use MongoDB database-user credentials for Cloudflare Worker-compatible deployments; X.509 certificate-file auth is not supported.");
+  }
+
+  if (nodeEnv === "production" && !/^mongodb(\+srv)?:\/\/[^:/@]+:[^@]+@/i.test(mongoUri)) {
+    throw new Error("MONGO_URI must include MongoDB database-user credentials.");
+  }
 }

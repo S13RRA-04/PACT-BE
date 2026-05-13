@@ -1,4 +1,4 @@
-import { Db, MongoClient, type MongoClientOptions } from "mongodb";
+import { Db, MongoClient } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 
 const clients = new Map<string, Promise<MongoClient>>();
@@ -23,19 +23,13 @@ export async function closeMongoClient() {
 }
 
 async function connectMongoClient(config: AppConfig) {
-  const options: MongoClientOptions = config.mongoTlsCertKeyFile
-    ? { tlsCertificateKeyFile: config.mongoTlsCertKeyFile }
-    : {};
-  const client = new MongoClient(config.mongoUri, options);
+  const client = new MongoClient(config.mongoUri);
   await client.connect();
   return client;
 }
 
 function mongoClientKey(config: AppConfig) {
-  return JSON.stringify({
-    uri: config.mongoUri,
-    tlsCertificateKeyFile: config.mongoTlsCertKeyFile
-  });
+  return config.mongoUri;
 }
 
 export function collectionName(config: AppConfig, name: string) {
