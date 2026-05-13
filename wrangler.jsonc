@@ -1,14 +1,26 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "cetu-pact-api-staging",
+  "name": "cetu-pact-api",
   "main": "src/worker.ts",
   "compatibility_date": "2026-05-12",
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
   },
-  "vars": {
-    "PACT_API_ORIGIN": "https://pact-api-origin-staging.cetu.online",
-    "CORS_ORIGINS": "https://cetu-pact-web-staging.pages.dev,https://pact-staging.cetu.online"
+  "env": {
+    "staging": {
+      "name": "cetu-pact-api-staging",
+      "vars": {
+        "PACT_API_ORIGIN": "https://pact-api-origin-staging.cetu.online",
+        "CORS_ORIGINS": "https://cetu-pact-web-staging.pages.dev,https://pact-staging.cetu.online,https://cetu-lms-web-staging.pages.dev,https://lms-staging.cetu.online"
+      }
+    },
+    "production": {
+      "name": "cetu-pact-api",
+      "vars": {
+        "PACT_API_ORIGIN": "https://pact-api-origin.cetu.online",
+        "CORS_ORIGINS": "https://pact2.cetu.online,https://lms.cetu.online"
+      }
+    }
   }
 }

@@ -1,22 +1,41 @@
 import { Db, MongoClient, type MongoClientOptions } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 
-let client: MongoClient | undefined;
+const clients = new Map<string, Promise<MongoClient>>();
 
 export async function getMongoDb(config: AppConfig): Promise<Db> {
-  if (!client) {
-    const options: MongoClientOptions = config.mongoTlsCertKeyFile
-      ? { tlsCertificateKeyFile: config.mongoTlsCertKeyFile }
-      : {};
-    client = new MongoClient(config.mongoUri, options);
-    await client.connect();
+  const key = mongoClientKey(config);
+  let clientPromise = clients.get(key);
+
+  if (!clientPromise) {
+    clientPromise = connectMongoClient(config);
+    clients.set(key, clientPromise);
   }
+
+  const client = await clientPromise;
   return client.db(config.mongoDbName);
 }
 
 export async function closeMongoClient() {
-  await client?.close();
-  client = undefined;
+  const clientPromises = [...clients.values()];
+  clients.clear();
+  await Promise.all(clientPromises.map(async (clientPromise) => (await clientPromise).close()));
+}
+
+async function connectMongoClient(config: AppConfig) {
+  const options: MongoClientOptions = config.mongoTlsCertKeyFile
+    ? { tlsCertificateKeyFile: config.mongoTlsCertKeyFile }
+    : {};
+  const client = new MongoClient(config.mongoUri, options);
+  await client.connect();
+  return client;
+}
+
+function mongoClientKey(config: AppConfig) {
+  return JSON.stringify({
+    uri: config.mongoUri,
+    tlsCertificateKeyFile: config.mongoTlsCertKeyFile
+  });
 }
 
 export function collectionName(config: AppConfig, name: string) {

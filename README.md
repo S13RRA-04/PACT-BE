@@ -12,6 +12,57 @@ npm run db:ensure
 npm run dev
 ```
 
+## Deployment paths
+
+PACT backend has two runtime layers:
+
+- Node/Express origin service: owns MongoDB access, LTI validation, sessions, scores, and LMS AGS calls.
+- Cloudflare Worker proxy: exposes the public API edge and forwards traffic to the Node origin.
+
+Staging and production are intentionally separate.
+
+| Target | Worker deploy command | Worker name | Origin URL | CORS origins |
+| --- | --- | --- | --- | --- |
+| Staging | `npm run deploy:worker:staging` | `cetu-pact-api-staging` | `https://pact-api-origin-staging.cetu.online` | `https://cetu-pact-web-staging.pages.dev,https://pact-staging.cetu.online` |
+| Production | `npm run deploy:worker:production` | `cetu-pact-api` | `https://pact-api-origin.cetu.online` | `https://pact2.cetu.online,https://lms.cetu.online` |
+
+The deploy scripts run `npm run build` and `npm test` before publishing. Worker names, origins, and CORS origins are defined in `wrangler.jsonc` under `env.staging` and `env.production`, so staging and production deploys use explicit Wrangler environments:
+
+```powershell
+npx wrangler deploy --env staging
+npx wrangler deploy --env production
+```
+
+Use the npm scripts for the guarded path:
+
+```powershell
+npm run deploy:worker:staging
+npm run deploy:worker:production
+```
+
+The staging Worker proxy requires the PACT Node origin to be reachable through the named Cloudflare Tunnel at `https://pact-api-origin-staging.cetu.online`. The production Worker proxy uses a separate origin hostname, `https://pact-api-origin.cetu.online`, so the public API hostname can point at the Worker without proxying back to itself. The PACT origin's `APP_BASE_URL` should still be the public API URL, `https://pact2-api.cetu.online`, because LTI and Deep Linking URLs are sent back to the LMS. Tunnel config lives outside the repo, for example:
+
+```yaml
+tunnel: 5a73f921-0f89-40fc-bbb9-e7220ff5c53f
+credentials-file: C:\Users\CETUAdmin1\.cloudflared\5a73f921-0f89-40fc-bbb9-e7220ff5c53f.json
+
+ingress:
+  - hostname: pact-api-origin-staging.cetu.online
+    service: http://127.0.0.1:4100
+  - service: http_status:404
+```
+
+GitHub houses repository code only. Deployments are managed intentionally with Wrangler from an authenticated operator workstation or controlled deployment host.
+
+The production origin can be started with:
+
+```powershell
+npm run build
+.\scripts\start-production-origin.ps1
+```
+
+Do not put Mongo credentials, LTI private keys, Keycloak secrets, or API tokens in frontend repositories or Cloudflare Pages variables.
+
 ## Importing PACT modules
 
 Question-bank JSON files can be imported as published PACT modules. Each source file becomes one `pactContent` module with the full validated question payload stored server-side.

@@ -13,7 +13,7 @@ export default {
     if (!origin || origin.includes("example.com")) {
       return withCors(
         Response.json(
-          { error: { code: "PACT_ORIGIN_NOT_CONFIGURED", message: "PACT API origin is not configured for staging" } },
+          { error: { code: "PACT_ORIGIN_NOT_CONFIGURED", message: "PACT API origin is not configured" } },
           { status: 503 }
         ),
         env,
@@ -22,6 +22,18 @@ export default {
     }
 
     const url = new URL(request.url);
+    const originUrl = new URL(origin);
+    if (originUrl.host === url.host) {
+      return withCors(
+        Response.json(
+          { error: { code: "PACT_ORIGIN_LOOP", message: "PACT API origin cannot match the Worker host" } },
+          { status: 508 }
+        ),
+        env,
+        request
+      );
+    }
+
     const upstreamUrl = new URL(`${origin}${url.pathname}${url.search}`);
     const upstreamRequest = new Request(upstreamUrl, request);
     const upstreamResponse = await fetch(upstreamRequest);
