@@ -9,6 +9,7 @@ export type PactSession = {
   cohortId: string;
   squadId?: string;
   contentType?: ContentType;
+  csrfToken?: string;
 };
 
 export class SessionService {
@@ -37,7 +38,8 @@ export class SessionService {
       courseId: String(payload.courseId),
       cohortId: String(payload.cohortId),
       squadId: payload.squadId ? String(payload.squadId) : undefined,
-      contentType: isContentType(payload.contentType) ? payload.contentType : undefined
+      contentType: isContentType(payload.contentType) ? payload.contentType : undefined,
+      csrfToken: payload.csrfToken ? String(payload.csrfToken) : undefined
     };
   }
 }

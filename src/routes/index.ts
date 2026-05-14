@@ -1,7 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import type { AppConfig } from "../config/config.js";
 import { getMongoDb } from "../db/mongo.js";
-import { currentSession, requirePactRole } from "../middleware/currentSession.js";
+import { currentSession, requireCsrfForCookieSession, requirePactRole, sessionCookie } from "../middleware/currentSession.js";
 import { LmsAgsClient } from "../integrations/lmsAgsClient.js";
 import { PactRepository } from "../repositories/pactRepository.js";
 import { LtiLaunchService } from "../services/ltiLaunchService.js";
@@ -43,6 +43,7 @@ export function createApiRouter(config: AppConfig) {
   });
 
   router.use(currentSession(config));
+  router.use(requireCsrfForCookieSession);
 
   router.get("/content", async (req, res, next) => {
     try {
@@ -255,13 +256,13 @@ export function ltiLaunchHandler(config: AppConfig) {
         ltiLaunchSchema.parse(req.body).id_token,
         parseLaunchContentType(req.params.contentType)
       );
+      res.setHeader("set-cookie", sessionCookie(response.sessionToken, config));
       if (acceptsHtml(req)) {
         const target = new URL(config.pactWebBaseUrl);
-        target.hash = `sessionToken=${encodeURIComponent(response.sessionToken)}`;
         res.redirect(303, target.toString());
         return;
       }
-      res.status(200).json(response);
+      res.status(200).json({ user: response.user, ags: response.ags, resourceLink: response.resourceLink });
     } catch (error) {
       next(error);
     }

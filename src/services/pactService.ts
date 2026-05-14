@@ -28,7 +28,8 @@ export class PactService {
       cohortId: user.cohortId,
       squadId: user.squadId,
       squadNumber: squad?.number ?? squad?.name.match(/^Squad ([1-4])$/)?.[1],
-      contentType: session.contentType
+      contentType: session.contentType,
+      csrfToken: session.csrfToken
     };
   }
 

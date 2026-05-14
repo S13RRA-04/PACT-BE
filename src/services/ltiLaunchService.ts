@@ -80,7 +80,8 @@ export class LtiLaunchService {
       courseId: user.courseId,
       cohortId: user.cohortId,
       squadId: user.squadId,
-      contentType
+      contentType,
+      csrfToken: crypto.randomUUID()
     });
 
     return {

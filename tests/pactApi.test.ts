@@ -8,6 +8,7 @@ import type { AppConfig } from "../src/config/config.js";
 import { ensureMongoCollections, getMongoDb } from "../src/db/mongo.js";
 import { SessionService } from "../src/auth/sessionService.js";
 import { createLogger } from "../src/logging/logger.js";
+import { pactSessionCookieName } from "../src/middleware/currentSession.js";
 
 let mongo: MongoMemoryServer;
 let jwksServer: http.Server;
@@ -1120,11 +1121,9 @@ describe("PACT API", () => {
       .send({ id_token: idToken })
       .expect(303);
 
-    expect(response.headers.location).toMatch(/^http:\/\/pact\.example\.test\/#sessionToken=/);
-    const launchUrl = new URL(response.headers.location);
-    const sessionToken = new URLSearchParams(launchUrl.hash.replace(/^#/, "")).get("sessionToken");
-    expect(sessionToken).toEqual(expect.any(String));
-    await expect(new SessionService(config.pactSessionSecret).verify(sessionToken as string)).resolves.toMatchObject({
+    expect(response.headers.location).toBe("http://pact.example.test/");
+    const sessionToken = sessionTokenFromSetCookie(response.headers["set-cookie"]);
+    await expect(new SessionService(config.pactSessionSecret).verify(sessionToken)).resolves.toMatchObject({
       contentType: "module"
     });
 
@@ -1173,13 +1172,14 @@ describe("PACT API", () => {
       .type("form")
       .send({ id_token: idToken })
       .expect(303);
-    const launchUrl = new URL(launchResponse.headers.location);
-    const sessionToken = new URLSearchParams(launchUrl.hash.replace(/^#/, "")).get("sessionToken");
+    const sessionCookie = sessionCookieFromSetCookie(launchResponse.headers["set-cookie"]);
 
     const sessionResponse = await request(createApp(config, createLogger(config)))
       .get("/api/v1/session")
-      .set("authorization", `Bearer ${sessionToken}`)
+      .set("cookie", sessionCookie)
       .expect(200);
+    const csrfToken = sessionResponse.body.csrfToken;
+    expect(csrfToken).toEqual(expect.any(String));
     const user = await db.collection("test_pactUsers").findOne({ lmsUserId: "lms-user-launch" });
 
     expect(user).toMatchObject({ squadId: "pact-owned-squad-3" });
@@ -1188,6 +1188,23 @@ describe("PACT API", () => {
       squadId: "pact-owned-squad-3",
       squadNumber: "3"
     });
+
+    await db.collection("test_pactContent").updateOne(
+      { id: "cookie-protected-content" },
+      { $set: publishedContent("cookie-protected-content", "cohort-launch", "learner", "published", "module") },
+      { upsert: true }
+    );
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/cookie-protected-content/progress")
+      .set("cookie", sessionCookie)
+      .send({ progressPercent: 25 })
+      .expect(403);
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/cookie-protected-content/progress")
+      .set("cookie", sessionCookie)
+      .set("x-csrf-token", csrfToken)
+      .send({ progressPercent: 25 })
+      .expect(200);
   });
 
   it("returns a signed Deep Linking JSON payload for frontend relays", async () => {
@@ -1332,4 +1349,20 @@ function publishedContent(id: string, cohortId: string | null, role: "learner" |
     createdAt: now,
     updatedAt: now
   };
+}
+
+function sessionTokenFromSetCookie(setCookie: string | string[] | undefined) {
+  const cookie = sessionCookieFromSetCookie(setCookie);
+  const value = cookie.split("=", 2)[1];
+  expect(value).toEqual(expect.any(String));
+  return decodeURIComponent(value);
+}
+
+function sessionCookieFromSetCookie(setCookie: string | string[] | undefined) {
+  const values = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+  expect(values.length).toBeGreaterThan(0);
+  const cookie = values.find((item) => item.startsWith(`${pactSessionCookieName}=`));
+  expect(cookie).toEqual(expect.any(String));
+  expect(cookie).toContain("HttpOnly");
+  return cookie?.split(";", 1)[0] ?? "";
 }

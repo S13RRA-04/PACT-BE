@@ -55,7 +55,7 @@ export class PactRepository {
       .find(filter)
       .sort({ cohortId: 1, number: 1, name: 1 })
       .toArray();
-    const cohortIds = Array.from(new Set([...users.map((user) => user.cohortId), ...squads.map((squad) => squad.cohortId)])).sort();
+    const cohortIds = Array.from(new Set([session.cohortId, ...users.map((user) => user.cohortId), ...squads.map((squad) => squad.cohortId)])).sort();
 
     return cohortIds.map((cohortId) => ({
       courseId: session.courseId,
