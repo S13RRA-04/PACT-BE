@@ -11,6 +11,18 @@ export class PactService {
     return this.repository.listContentFor(user);
   }
 
+  async getSessionDiagnostic(session: PactSession) {
+    const user = await this.repository.requireUser(session.userId);
+    const visibleContent = await this.repository.listContentFor(user);
+
+    return {
+      courseId: session.courseId,
+      cohortId: session.cohortId,
+      role: session.role,
+      visibleContentCount: visibleContent.length
+    };
+  }
+
   async submitScore(session: PactSession, input: { contentId: string; score: number; maxScore?: number; progressPercent: number; agsAccessToken?: string }) {
     const user = await this.repository.requireUser(session.userId);
     const content = await this.repository.requireContent(input.contentId);

@@ -61,7 +61,7 @@ export class LtiLaunchService {
 
     const custom = payload["https://purl.imsglobal.org/spec/lti/claim/custom"] ?? {};
     const context = payload["https://purl.imsglobal.org/spec/lti/claim/context"];
-    const courseId = custom.course_id ?? context?.label ?? context?.id ?? "pact";
+    const courseId = custom.course_id ?? context?.label ?? "pact";
     const cohortId = custom.cohort_id ?? context?.id;
     if (!cohortId) throw new AppError(400, "COHORT_REQUIRED", "LTI launch must include a cohort context");
 

@@ -27,7 +27,7 @@ export type Squad = {
 export type PactContent = {
   id: string;
   courseId: string;
-  cohortId?: string;
+  cohortId?: string | null;
   role: PactRole | "all";
   type: ContentType;
   title: string;

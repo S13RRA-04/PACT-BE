@@ -67,7 +67,7 @@ export class PactRepository {
       return this.content()
         .find({
           courseId: user.courseId,
-          $or: [{ cohortId: user.cohortId }, { cohortId: { $exists: false } }]
+          $or: globalOrCohortFilter(user.cohortId)
         })
         .sort({ type: 1, title: 1 })
         .toArray();
@@ -78,7 +78,7 @@ export class PactRepository {
         courseId: user.courseId,
         status: "published",
         role: { $in: [user.role, "all"] },
-        $or: [{ cohortId: user.cohortId }, { cohortId: { $exists: false } }]
+        $or: globalOrCohortFilter(user.cohortId)
       })
       .sort({ type: 1, title: 1 })
       .toArray();
@@ -87,7 +87,7 @@ export class PactRepository {
   async listContentForManagement(session: { role: PactRole; courseId: string; cohortId: string }) {
     const filter: Record<string, unknown> = { courseId: session.courseId };
     if (session.role === "instructor") {
-      filter.$or = [{ cohortId: session.cohortId }, { cohortId: { $exists: false } }];
+      filter.$or = globalOrCohortFilter(session.cohortId);
     }
 
     return this.content()
@@ -184,4 +184,8 @@ export class PactRepository {
   private scores() {
     return this.db.collection<PactScore>(collectionName(this.config, "pactScores"));
   }
+}
+
+function globalOrCohortFilter(cohortId: string) {
+  return [{ cohortId }, { cohortId: null }, { cohortId: { $exists: false } }];
 }

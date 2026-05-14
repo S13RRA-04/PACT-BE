@@ -53,13 +53,17 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
   const mongoUri = buildMongoUri(configuredMongoUri, parsed.MONGO_USERNAME, parsed.MONGO_PASSWORD);
   assertWorkerCompatibleMongoUri(mongoUri, parsed.NODE_ENV);
 
+  const mongoCollectionPrefix = parsed.MONGO_COLLECTION_PREFIX === "__empty__"
+    ? ""
+    : parsed.MONGO_COLLECTION_PREFIX ?? (parsed.NODE_ENV === "production" ? "" : "pact_dev_");
+
   return {
     env: parsed.NODE_ENV,
     port: parsed.PORT,
     appBaseUrl: parsed.APP_BASE_URL.replace(/\/$/, ""),
     mongoUri,
     mongoDbName: parsed.MONGODB_DB ?? parsed.MONGO_DB_NAME ?? "PACT_V4",
-    mongoCollectionPrefix: parsed.MONGO_COLLECTION_PREFIX ?? (parsed.NODE_ENV === "production" ? "" : "pact_dev_"),
+    mongoCollectionPrefix,
     lmsApiBaseUrl: parsed.LMS_API_BASE_URL.replace(/\/$/, ""),
     lmsPlatformIssuer: parsed.LMS_PLATFORM_ISSUER.replace(/\/$/, ""),
     lmsPlatformJwksUri: parsed.LMS_PLATFORM_JWKS_URI,

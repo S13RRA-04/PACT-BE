@@ -111,6 +111,14 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/admin/diagnostics/session", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.getSessionDiagnostic(requireSession(req))));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.patch("/admin/content/:contentId/status", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);

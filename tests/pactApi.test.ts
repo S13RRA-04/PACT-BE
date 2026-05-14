@@ -71,7 +71,8 @@ describe("PACT API", () => {
     await db.collection("test_pactContent").insertMany([
       publishedContent("content-1", "cohort-a", "learner"),
       publishedContent("content-2", "cohort-b", "learner"),
-      publishedContent("content-3", "cohort-a", "admin")
+      publishedContent("content-3", "cohort-a", "admin"),
+      publishedContent("content-global", null, "learner")
     ]);
 
     const token = await new SessionService(config.pactSessionSecret).sign({
@@ -87,8 +88,7 @@ describe("PACT API", () => {
       .set("authorization", `Bearer ${token}`)
       .expect(200);
 
-    expect(response.body).toHaveLength(1);
-    expect(response.body[0].id).toBe("content-1");
+    expect(response.body.map((item: { id: string }) => item.id)).toEqual(["content-1", "content-global"]);
   });
 
   it("serves all scoped content to admins and instructors for review", async () => {
@@ -126,7 +126,8 @@ describe("PACT API", () => {
     await db.collection("test_pactContent").insertMany([
       publishedContent("admin-visible-draft", "cohort-a", "learner", "draft"),
       publishedContent("admin-visible-assessment", "cohort-a", "learner", "published", "assessment"),
-      publishedContent("admin-visible-other-cohort", "cohort-b", "learner", "draft")
+      publishedContent("admin-visible-other-cohort", "cohort-b", "learner", "draft"),
+      publishedContent("admin-visible-global", null, "learner", "draft")
     ]);
 
     const adminToken = await new SessionService(config.pactSessionSecret).sign({
@@ -158,9 +159,43 @@ describe("PACT API", () => {
     ]));
     expect(instructorResponse.body.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining([
       "admin-visible-draft",
-      "admin-visible-assessment"
+      "admin-visible-assessment",
+      "admin-visible-global"
     ]));
     expect(instructorResponse.body.some((item: { id: string }) => item.id === "admin-visible-other-cohort")).toBe(false);
+  });
+
+  it("returns admin-only session diagnostics with visible content count", async () => {
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "instructor-visible",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-a"
+    });
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "user-1",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-a",
+      squadId: "squad-1"
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/diagnostics/session")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .expect(403);
+
+    const response = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/diagnostics/session")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      courseId: "pact",
+      cohortId: "cohort-a",
+      role: "instructor"
+    });
+    expect(response.body.visibleContentCount).toBeGreaterThan(0);
   });
 
   it("records scores and returns scoreboard entries", async () => {
@@ -365,7 +400,7 @@ async function signResourceLaunch() {
     "https://purl.imsglobal.org/spec/lti/claim/message_type": "LtiResourceLinkRequest",
     "https://purl.imsglobal.org/spec/lti/claim/version": "1.3.0",
     "https://purl.imsglobal.org/spec/lti/claim/deployment_id": "deployment-1",
-    "https://purl.imsglobal.org/spec/lti/claim/context": { id: "cohort-launch", label: "pact", title: "PACT" },
+    "https://purl.imsglobal.org/spec/lti/claim/context": { id: "cohort-launch", title: "PACT" },
     "https://purl.imsglobal.org/spec/lti/claim/roles": ["http://purl.imsglobal.org/vocab/lis/v2/membership#Learner"],
     "https://purl.imsglobal.org/spec/lti/claim/resource_link": { id: "pact-module-hub", title: "PACT Modules" }
   })
@@ -378,7 +413,7 @@ async function signResourceLaunch() {
     .sign(platformPrivateKey);
 }
 
-function publishedContent(id: string, cohortId: string, role: "learner" | "admin", status = "published", type = "module") {
+function publishedContent(id: string, cohortId: string | null, role: "learner" | "admin", status = "published", type = "module") {
   const now = new Date().toISOString();
   return {
     id,

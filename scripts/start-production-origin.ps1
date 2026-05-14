@@ -41,6 +41,6 @@ $env:LMS_PLATFORM_ISSUER = $LmsApiBaseUrl
 $env:LMS_PLATFORM_JWKS_URI = "$LmsApiBaseUrl/api/v1/lti/jwks"
 $env:LMS_DEEP_LINK_RETURN_URL = "$LmsApiBaseUrl/api/v1/lti/deep-linking/return"
 $env:CORS_ORIGINS = $FrontendOrigins
-$env:MONGO_COLLECTION_PREFIX = ""
+$env:MONGO_COLLECTION_PREFIX = "__empty__"
 
 npm run start
