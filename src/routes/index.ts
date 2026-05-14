@@ -172,6 +172,15 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/admin/analytics/cohort-progress", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const cohortId = typeof req.query.cohortId === "string" && req.query.cohortId.trim() ? req.query.cohortId.trim() : undefined;
+      res.status(200).json(await pactService(config).then((service) => service.getCohortProgressAnalytics(requireSession(req), cohortId)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.patch("/admin/content/:contentId/status", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);

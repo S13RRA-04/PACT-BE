@@ -786,6 +786,151 @@ describe("PACT API", () => {
     });
   });
 
+  it("returns instructor cohort progress analytics without exposing LMS user IDs", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "analytics-instructor",
+        lmsUserId: "lms-analytics-instructor",
+        role: "instructor",
+        courseId: "pact-analytics",
+        cohortId: "cohort-analytics-a",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "analytics-learner-a",
+        lmsUserId: "lms-analytics-learner-a",
+        name: "Analytics Learner A",
+        role: "learner",
+        courseId: "pact-analytics",
+        cohortId: "cohort-analytics-a",
+        squadId: "analytics-squad-1",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "analytics-learner-b",
+        lmsUserId: "lms-analytics-learner-b",
+        name: "Analytics Learner B",
+        role: "learner",
+        courseId: "pact-analytics",
+        cohortId: "cohort-analytics-b",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactSquads").insertOne({
+      id: "analytics-squad-1",
+      courseId: "pact-analytics",
+      cohortId: "cohort-analytics-a",
+      name: "Squad 1",
+      number: "1",
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContent").insertMany([
+      { ...publishedContent("analytics-content-a", "cohort-analytics-a", "learner", "published"), courseId: "pact-analytics" },
+      { ...publishedContent("analytics-content-global", null, "learner", "published"), courseId: "pact-analytics" }
+    ]);
+    await db.collection("test_pactContentProgress").insertMany([
+      {
+        id: "analytics-progress-a",
+        courseId: "pact-analytics",
+        cohortId: "cohort-analytics-a",
+        squadId: "analytics-squad-1",
+        userId: "analytics-learner-a",
+        contentId: "analytics-content-a",
+        contentType: "module",
+        answers: { q1: "a" },
+        answeredQuestionIds: ["q1"],
+        progressPercent: 50,
+        score: 5,
+        maxScore: 10,
+        status: "in_progress",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "analytics-progress-b",
+        courseId: "pact-analytics",
+        cohortId: "cohort-analytics-b",
+        userId: "analytics-learner-b",
+        contentId: "analytics-content-global",
+        contentType: "module",
+        answers: { q1: "a" },
+        answeredQuestionIds: ["q1"],
+        progressPercent: 100,
+        score: 10,
+        maxScore: 10,
+        status: "submitted",
+        submittedAt: now,
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "analytics-instructor",
+      role: "instructor",
+      courseId: "pact-analytics",
+      cohortId: "cohort-analytics-a"
+    });
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "analytics-learner-a",
+      role: "learner",
+      courseId: "pact-analytics",
+      cohortId: "cohort-analytics-a"
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/analytics/cohort-progress")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .expect(403);
+
+    const response = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/analytics/cohort-progress?cohortId=cohort-analytics-a")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      courseId: "pact-analytics",
+      cohortId: "cohort-analytics-a",
+      learnerCount: 1,
+      assignedContentCount: 2,
+      startedContentCount: 1,
+      submittedContentCount: 0,
+      averageProgressPercent: 50,
+      learners: [
+        expect.objectContaining({
+          userId: "analytics-learner-a",
+          name: "Analytics Learner A",
+          squadNumber: "1",
+          startedCount: 1,
+          submittedCount: 0,
+          assignedCount: 2,
+          averageProgressPercent: 50,
+          totalScore: 5,
+          maxScore: 10
+        })
+      ]
+    });
+    expect(JSON.stringify(response.body)).not.toContain("lms-analytics-learner-a");
+
+    const crossCohortResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/analytics/cohort-progress?cohortId=cohort-analytics-b")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .expect(200);
+
+    expect(crossCohortResponse.body).toMatchObject({
+      cohortId: "cohort-analytics-b",
+      learnerCount: 1,
+      submittedContentCount: 1,
+      averageProgressPercent: 100
+    });
+  });
+
   it("lets admins and instructors gate content availability", async () => {
     const db = await getMongoDb(config);
     await db.collection("test_pactContent").updateOne(

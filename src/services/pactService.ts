@@ -55,6 +55,13 @@ export class PactService {
     };
   }
 
+  async getCohortProgressAnalytics(session: PactSession, cohortId?: string) {
+    if (session.role !== "admin" && session.role !== "instructor") {
+      throw new AppError(403, "FORBIDDEN", "Instructor access is required");
+    }
+    return this.repository.cohortProgressAnalytics(session, cohortId);
+  }
+
   async submitScore(session: PactSession, input: { contentId: string; score: number; maxScore?: number; progressPercent: number; agsAccessToken?: string }) {
     const user = await this.repository.requireUser(session.userId);
     const content = await this.repository.requireContent(input.contentId);

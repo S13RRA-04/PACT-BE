@@ -528,6 +528,15 @@ function deriveProgressPercent(answeredCount: number, content: PactContent) {
   return questionCount ? Math.min(100, Math.round((answeredCount / questionCount) * 100)) : 0;
 }
 
+function groupBy<T>(items: T[], keyFor: (item: T) => string) {
+  const grouped = new Map<string, T[]>();
+  for (const item of items) {
+    const key = keyFor(item);
+    grouped.set(key, [...(grouped.get(key) ?? []), item]);
+  }
+  return grouped;
+}
+
 function globalOrCohortFilter(cohortId: string) {
   return [{ cohortId }, { cohortId: null }, { cohortId: { $exists: false } }];
 }
