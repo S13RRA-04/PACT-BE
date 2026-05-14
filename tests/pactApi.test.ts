@@ -293,6 +293,42 @@ describe("PACT API", () => {
         expect.objectContaining({ id: "admin-console-learner", squadId: assignResponse.body.squadId })
       ])
     );
+
+    const auditEvent = await db.collection("test_pactAuditEvents").findOne({
+      action: "squad.assignment.changed",
+      actorUserId: "admin-console-admin",
+      targetUserId: "admin-console-learner"
+    });
+    expect(auditEvent).toMatchObject({
+      courseId: "pact-console",
+      cohortId: "cohort-console-a",
+      metadata: {
+        nextSquadId: assignResponse.body.squadId,
+        nextSquadNumber: "3"
+      }
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/audit-events")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .expect(403);
+
+    const auditResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/audit-events")
+      .set("authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(auditResponse.body.events[0]).toMatchObject({
+      action: "squad.assignment.changed",
+      actorUserId: "admin-console-admin",
+      targetUserId: "admin-console-learner",
+      targetName: "Console Learner",
+      courseId: "pact-console",
+      cohortId: "cohort-console-a",
+      nextSquadId: assignResponse.body.squadId,
+      nextSquadNumber: "3"
+    });
+    expect(JSON.stringify(auditResponse.body)).not.toContain("lms-admin-console-learner");
   });
 
   it("records scores and returns scoreboard entries", async () => {

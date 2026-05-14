@@ -81,3 +81,18 @@ export type PactScore = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type PactAuditEvent = {
+  id: string;
+  action: "squad.assignment.changed";
+  actorUserId: string;
+  targetUserId: string;
+  courseId: string;
+  cohortId: string;
+  metadata: {
+    previousSquadId?: string;
+    nextSquadId: string;
+    nextSquadNumber?: SquadNumber;
+  };
+  createdAt: string;
+};

@@ -93,6 +93,15 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/admin/audit-events", requirePactRole("admin"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json({ events: await repository.listAdminAuditEvents(requireSession(req)) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.patch("/admin/users/:userId/squad", requirePactRole("admin"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);

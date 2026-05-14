@@ -2,7 +2,7 @@ import type { Db } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 import { collectionName } from "../db/mongo.js";
 import { AppError } from "../errors/AppError.js";
-import type { ContentStatus, ContentType, PactContent, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
+import type { ContentStatus, ContentType, PactAuditEvent, PactContent, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
 
 export class PactRepository {
   constructor(private readonly db: Db, private readonly config: AppConfig) {}
@@ -78,6 +78,39 @@ export class PactRepository {
     }));
   }
 
+  async listAdminAuditEvents(session: { courseId: string }) {
+    const events = await this.auditEvents()
+      .find({ courseId: session.courseId, action: "squad.assignment.changed" })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .toArray();
+    const userIds = Array.from(new Set(events.flatMap((event) => [event.actorUserId, event.targetUserId])));
+    const users = await this.users()
+      .find({ courseId: session.courseId, id: { $in: userIds } })
+      .project<Pick<PactUser, "id" | "name" | "email" | "role">>({ _id: 0, id: 1, name: 1, email: 1, role: 1 })
+      .toArray();
+    const usersById = new Map(users.map((user) => [user.id, user]));
+
+    return events.map((event) => {
+      const actor = usersById.get(event.actorUserId);
+      const target = usersById.get(event.targetUserId);
+      return {
+        id: event.id,
+        action: event.action,
+        actorUserId: event.actorUserId,
+        actorName: actor?.name ?? actor?.email,
+        targetUserId: event.targetUserId,
+        targetName: target?.name ?? target?.email,
+        courseId: event.courseId,
+        cohortId: event.cohortId,
+        previousSquadId: event.metadata.previousSquadId,
+        nextSquadId: event.metadata.nextSquadId,
+        nextSquadNumber: event.metadata.nextSquadNumber,
+        createdAt: event.createdAt
+      };
+    });
+  }
+
   async assignSquad(userId: string, squadId: string) {
     const user = await this.requireUser(userId);
     const squad = await this.squads().findOne({ id: squadId, courseId: user.courseId, cohortId: user.cohortId });
@@ -86,7 +119,7 @@ export class PactRepository {
     return { ...user, squadId, updatedAt: new Date().toISOString() };
   }
 
-  async assignSquadForAdmin(userId: string, input: { squadId?: string; squadNumber?: SquadNumber; session: { courseId: string } }) {
+  async assignSquadForAdmin(userId: string, input: { squadId?: string; squadNumber?: SquadNumber; session: { userId: string; courseId: string } }) {
     const user = await this.requireUser(userId);
     if (user.courseId !== input.session.courseId) {
       throw new AppError(403, "USER_FORBIDDEN", "User is not assigned to this course");
@@ -102,6 +135,21 @@ export class PactRepository {
 
     const updatedAt = new Date().toISOString();
     await this.users().updateOne({ id: userId }, { $set: { squadId: squad.id, updatedAt } });
+    await this.auditEvents().insertOne({
+      id: crypto.randomUUID(),
+      action: "squad.assignment.changed",
+      actorUserId: input.session.userId,
+      targetUserId: user.id,
+      courseId: user.courseId,
+      cohortId: user.cohortId,
+      metadata: {
+        previousSquadId: user.squadId,
+        nextSquadId: squad.id,
+        nextSquadNumber: squad.number ?? squadNumberFromName(squad.name)
+      },
+      createdAt: updatedAt
+    });
+
     return {
       id: user.id,
       email: user.email,
@@ -270,6 +318,10 @@ export class PactRepository {
 
   private scores() {
     return this.db.collection<PactScore>(collectionName(this.config, "pactScores"));
+  }
+
+  private auditEvents() {
+    return this.db.collection<PactAuditEvent>(collectionName(this.config, "pactAuditEvents"));
   }
 }
 
