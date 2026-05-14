@@ -15,7 +15,10 @@ export const squadCreateSchema = z.object({
 });
 
 export const squadAssignmentSchema = z.object({
-  squadId: z.string().uuid()
+  squadId: z.string().uuid().optional(),
+  squadNumber: z.enum(["1", "2", "3", "4"]).optional()
+}).refine((value) => value.squadId || value.squadNumber, {
+  message: "squadId or squadNumber is required"
 });
 
 export const contentCreateSchema = z.object({

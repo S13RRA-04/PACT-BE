@@ -11,6 +11,19 @@ export class PactService {
     return this.repository.listContentFor(user);
   }
 
+  async getSession(session: PactSession) {
+    const user = await this.repository.requireUser(session.userId);
+    const squad = user.squadId ? await this.repository.getSquad(user.squadId) : undefined;
+    return {
+      userId: user.id,
+      role: user.role,
+      courseId: user.courseId,
+      cohortId: user.cohortId,
+      squadId: user.squadId,
+      squadNumber: squad?.number ?? squad?.name.match(/^Squad ([1-4])$/)?.[1]
+    };
+  }
+
   async getSessionDiagnostic(session: PactSession) {
     const user = await this.repository.requireUser(session.userId);
     const visibleContent = await this.repository.listContentFor(user);

@@ -53,7 +53,7 @@ export function createApiRouter(config: AppConfig) {
 
   router.get("/session", async (req, res, next) => {
     try {
-      res.status(200).json(requireSession(req));
+      res.status(200).json(await pactService(config).then((service) => service.getSession(requireSession(req))));
     } catch (error) {
       next(error);
     }
@@ -84,10 +84,24 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/admin/cohorts", requirePactRole("admin"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json({ cohorts: await repository.listAdminCohorts(requireSession(req)) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.patch("/admin/users/:userId/squad", requirePactRole("admin"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);
-      res.status(200).json(await repository.assignSquad(req.params.userId, squadAssignmentSchema.parse(req.body).squadId));
+      const input = squadAssignmentSchema.parse(req.body);
+      res.status(200).json(await repository.assignSquadForAdmin(req.params.userId, {
+        squadId: input.squadId,
+        squadNumber: input.squadNumber,
+        session: requireSession(req)
+      }));
     } catch (error) {
       next(error);
     }

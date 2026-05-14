@@ -2,7 +2,7 @@ import type { Db } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 import { collectionName } from "../db/mongo.js";
 import { AppError } from "../errors/AppError.js";
-import type { ContentStatus, ContentType, PactContent, PactRole, PactScore, PactUser, Squad } from "../domain/types.js";
+import type { ContentStatus, ContentType, PactContent, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
 
 export class PactRepository {
   constructor(private readonly db: Db, private readonly config: AppConfig) {}
@@ -30,6 +30,10 @@ export class PactRepository {
     return user;
   }
 
+  async getSquad(squadId: string) {
+    return this.squads().findOne({ id: squadId });
+  }
+
   async createSquad(input: { courseId: string; cohortId: string; name: string }) {
     const now = new Date().toISOString();
     const existing = await this.squads().findOne(input);
@@ -39,12 +43,93 @@ export class PactRepository {
     return squad;
   }
 
+  async listAdminCohorts(session: { role: PactRole; courseId: string }) {
+    const users = await this.users()
+      .find({ courseId: session.courseId })
+      .sort({ cohortId: 1, role: 1, name: 1, email: 1 })
+      .toArray();
+    const squads = await this.squads()
+      .find({ courseId: session.courseId })
+      .sort({ cohortId: 1, number: 1, name: 1 })
+      .toArray();
+    const cohortIds = Array.from(new Set([...users.map((user) => user.cohortId), ...squads.map((squad) => squad.cohortId)])).sort();
+
+    return cohortIds.map((cohortId) => ({
+      courseId: session.courseId,
+      cohortId,
+      squads: squads
+        .filter((squad) => squad.cohortId === cohortId)
+        .map((squad) => ({
+          id: squad.id,
+          name: squad.name,
+          number: squad.number ?? squadNumberFromName(squad.name)
+        })),
+      users: users
+        .filter((user) => user.cohortId === cohortId)
+        .map((user) => ({
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          cohortId: user.cohortId,
+          squadId: user.squadId,
+          squadNumber: squadNumberForUser(user, squads)
+        }))
+    }));
+  }
+
   async assignSquad(userId: string, squadId: string) {
     const user = await this.requireUser(userId);
     const squad = await this.squads().findOne({ id: squadId, courseId: user.courseId, cohortId: user.cohortId });
     if (!squad) throw new AppError(400, "INVALID_SQUAD_ASSIGNMENT", "Squad does not belong to the user's course and cohort");
     await this.users().updateOne({ id: userId }, { $set: { squadId, updatedAt: new Date().toISOString() } });
     return { ...user, squadId, updatedAt: new Date().toISOString() };
+  }
+
+  async assignSquadForAdmin(userId: string, input: { squadId?: string; squadNumber?: SquadNumber; session: { courseId: string } }) {
+    const user = await this.requireUser(userId);
+    if (user.courseId !== input.session.courseId) {
+      throw new AppError(403, "USER_FORBIDDEN", "User is not assigned to this course");
+    }
+    if (user.role !== "learner") {
+      throw new AppError(400, "INVALID_SQUAD_ASSIGNMENT", "Only learners can be assigned to squads");
+    }
+
+    const squad = input.squadNumber
+      ? await this.ensureNumberedSquad(user.courseId, user.cohortId, input.squadNumber)
+      : await this.squads().findOne({ id: input.squadId, courseId: user.courseId, cohortId: user.cohortId });
+    if (!squad) throw new AppError(400, "INVALID_SQUAD_ASSIGNMENT", "Squad does not belong to the user's course and cohort");
+
+    const updatedAt = new Date().toISOString();
+    await this.users().updateOne({ id: userId }, { $set: { squadId: squad.id, updatedAt } });
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      courseId: user.courseId,
+      cohortId: user.cohortId,
+      squadId: squad.id,
+      updatedAt
+    };
+  }
+
+  private async ensureNumberedSquad(courseId: string, cohortId: string, number: SquadNumber) {
+    const now = new Date().toISOString();
+    const existing = await this.squads().findOne({ courseId, cohortId, number });
+    if (existing) return existing;
+
+    const squad: Squad = {
+      id: crypto.randomUUID(),
+      courseId,
+      cohortId,
+      name: `Squad ${number}`,
+      number,
+      createdAt: now,
+      updatedAt: now
+    };
+    await this.squads().insertOne(squad);
+    return squad;
   }
 
   async upsertContent(input: Omit<PactContent, "id" | "createdAt" | "updatedAt"> & { id?: string }) {
@@ -151,6 +236,7 @@ export class PactRepository {
     if (squadId) match.squadId = squadId;
     const scores = await this.scores().find(match).toArray();
     const users = await this.users().find({ courseId, cohortId }).toArray();
+    const squads = await this.squads().find({ courseId, cohortId }).toArray();
     return users.map((user) => {
       const userScores = scores.filter((score) => score.userId === user.id);
       const totalScore = userScores.reduce((total, score) => total + score.score, 0);
@@ -160,6 +246,7 @@ export class PactRepository {
         name: user.name,
         role: user.role,
         squadId: user.squadId,
+        squadNumber: squadNumberForUser(user, squads),
         totalScore,
         maxScore,
         progressPercent: userScores.length
@@ -188,4 +275,14 @@ export class PactRepository {
 
 function globalOrCohortFilter(cohortId: string) {
   return [{ cohortId }, { cohortId: null }, { cohortId: { $exists: false } }];
+}
+
+function squadNumberFromName(name: string): SquadNumber | undefined {
+  const match = /^Squad ([1-4])$/.exec(name);
+  return match?.[1] as SquadNumber | undefined;
+}
+
+function squadNumberForUser(user: Pick<PactUser, "squadId">, squads: Squad[]) {
+  const squad = squads.find((item) => item.id === user.squadId);
+  return squad?.number ?? (squad ? squadNumberFromName(squad.name) : undefined);
 }

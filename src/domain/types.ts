@@ -1,6 +1,7 @@
 export type PactRole = "admin" | "instructor" | "learner";
 export type ContentType = "module" | "challenge" | "game" | "assessment";
 export type ContentStatus = "draft" | "published" | "archived";
+export type SquadNumber = "1" | "2" | "3" | "4";
 
 export type PactUser = {
   id: string;
@@ -20,6 +21,7 @@ export type Squad = {
   courseId: string;
   cohortId: string;
   name: string;
+  number?: SquadNumber;
   createdAt: string;
   updatedAt: string;
 };

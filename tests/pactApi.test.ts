@@ -198,6 +198,103 @@ describe("PACT API", () => {
     expect(response.body.visibleContentCount).toBeGreaterThan(0);
   });
 
+  it("lets admins view cohorts and assign learners to numbered squads", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "admin-console-admin",
+        lmsUserId: "lms-admin-console-admin",
+        role: "admin",
+        courseId: "pact-console",
+        cohortId: "cohort-console-a",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "admin-console-learner",
+        lmsUserId: "lms-admin-console-learner",
+        email: "learner.console@example.test",
+        name: "Console Learner",
+        role: "learner",
+        courseId: "pact-console",
+        cohortId: "cohort-console-a",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "admin-console-instructor",
+        lmsUserId: "lms-admin-console-instructor",
+        name: "Console Instructor",
+        role: "instructor",
+        courseId: "pact-console",
+        cohortId: "cohort-console-a",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+
+    const adminToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "admin-console-admin",
+      role: "admin",
+      courseId: "pact-console",
+      cohortId: "cohort-console-a"
+    });
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "admin-console-learner",
+      role: "learner",
+      courseId: "pact-console",
+      cohortId: "cohort-console-a"
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/cohorts")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .expect(403);
+
+    const listResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/cohorts")
+      .set("authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(listResponse.body.cohorts[0]).toMatchObject({
+      courseId: "pact-console",
+      cohortId: "cohort-console-a",
+      users: expect.arrayContaining([
+        expect.objectContaining({ id: "admin-console-learner", role: "learner", name: "Console Learner" }),
+        expect.objectContaining({ id: "admin-console-instructor", role: "instructor", name: "Console Instructor" })
+      ])
+    });
+    expect(JSON.stringify(listResponse.body)).not.toContain("lms-admin-console-learner");
+
+    const assignResponse = await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/admin/users/admin-console-learner/squad")
+      .set("authorization", `Bearer ${adminToken}`)
+      .send({ squadNumber: "3" })
+      .expect(200);
+
+    expect(assignResponse.body).toMatchObject({
+      id: "admin-console-learner",
+      role: "learner",
+      cohortId: "cohort-console-a",
+      squadId: expect.any(String)
+    });
+
+    const refreshedResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/cohorts")
+      .set("authorization", `Bearer ${adminToken}`)
+      .expect(200);
+
+    expect(refreshedResponse.body.cohorts[0].squads).toEqual([
+      expect.objectContaining({ name: "Squad 3", number: "3" })
+    ]);
+    expect(refreshedResponse.body.cohorts[0].users).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "admin-console-learner", squadId: assignResponse.body.squadId })
+      ])
+    );
+  });
+
   it("records scores and returns scoreboard entries", async () => {
     const token = await new SessionService(config.pactSessionSecret).sign({
       userId: "user-1",
