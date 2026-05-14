@@ -8,7 +8,7 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 import type { ContentType } from "../domain/types.js";
 
@@ -66,6 +66,19 @@ export function createApiRouter(config: AppConfig) {
         requireSession(req),
         req.params.contentId,
         contentProgressUpdateSchema.parse(req.body)
+      )));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/content/:contentId/questions/:questionId/attempts", async (req, res, next) => {
+    try {
+      res.status(201).json(await pactService(config).then((service) => service.submitQuestionAttempt(
+        requireSession(req),
+        req.params.contentId,
+        req.params.questionId,
+        questionAttemptSubmitSchema.parse(req.body)
       )));
     } catch (error) {
       next(error);
@@ -176,6 +189,17 @@ export function createApiRouter(config: AppConfig) {
     try {
       const cohortId = typeof req.query.cohortId === "string" && req.query.cohortId.trim() ? req.query.cohortId.trim() : undefined;
       res.status(200).json(await pactService(config).then((service) => service.getCohortProgressAnalytics(requireSession(req), cohortId)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/analytics/question-attempts", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const query = questionAttemptQuerySchema.parse(req.query);
+      res.status(200).json({
+        attempts: await pactService(config).then((service) => service.getQuestionAttempts(requireSession(req), query))
+      });
     } catch (error) {
       next(error);
     }

@@ -786,6 +786,123 @@ describe("PACT API", () => {
     });
   });
 
+  it("records per-question attempts and exposes instructor review without LMS user IDs", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactContent").updateOne(
+      { id: "attempt-content" },
+      {
+        $set: {
+          ...publishedContent("attempt-content", "cohort-a", "learner", "published", "module"),
+          questionCount: 1,
+          questions: [
+            {
+              id: "attempt-q1",
+              version: 2,
+              topic: "Triage",
+              payload: {
+                kind: "multiple_choice",
+                selectionMode: "single",
+                correct: ["b"]
+              },
+              feedback: {
+                correct: { en: "Correct path." },
+                incorrect: { en: "Review the triage path." },
+                reference: "PACT-REF-1"
+              },
+              scoring: { points: 5, difficulty: "easy", mustPass: false }
+            }
+          ]
+        }
+      },
+      { upsert: true }
+    );
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "user-1",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-a",
+      squadId: "squad-1"
+    });
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "instructor-1",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-a"
+    });
+
+    const firstAttempt = await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/attempt-content/questions/attempt-q1/attempts")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .send({ answer: "a", feedbackExposed: true })
+      .expect(201);
+
+    expect(firstAttempt.body.attempt).toMatchObject({
+      userId: "user-1",
+      contentId: "attempt-content",
+      questionId: "attempt-q1",
+      questionVersion: 2,
+      attemptNumber: 1,
+      answer: "a",
+      score: 0,
+      maxScore: 5,
+      isCorrect: false,
+      feedbackExposed: true,
+      feedbackExposedAt: expect.any(String),
+      submittedAt: expect.any(String)
+    });
+    expect(firstAttempt.body.progress).toMatchObject({
+      contentId: "attempt-content",
+      progressPercent: 100,
+      answeredQuestionIds: ["attempt-q1"],
+      answers: { "attempt-q1": "a" }
+    });
+
+    const secondAttempt = await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/attempt-content/questions/attempt-q1/attempts")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .send({ answer: "b", feedbackExposed: true })
+      .expect(201);
+
+    expect(secondAttempt.body.attempt).toMatchObject({
+      attemptNumber: 2,
+      answer: "b",
+      score: 5,
+      isCorrect: true
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/analytics/question-attempts")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .expect(403);
+
+    const reviewResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/analytics/question-attempts?cohortId=cohort-a&contentId=attempt-content")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .expect(200);
+
+    expect(reviewResponse.body.attempts).toEqual([
+      expect.objectContaining({
+        userId: "user-1",
+        contentId: "attempt-content",
+        contentTitle: "attempt-content",
+        questionId: "attempt-q1",
+        questionTopic: "Triage",
+        attemptNumber: 2,
+        answer: "b",
+        score: 5,
+        isCorrect: true,
+        feedbackExposed: true
+      }),
+      expect.objectContaining({
+        attemptNumber: 1,
+        answer: "a",
+        score: 0,
+        isCorrect: false
+      })
+    ]);
+    expect(JSON.stringify(reviewResponse.body)).not.toContain("lms-user-1");
+  });
+
   it("returns instructor cohort progress analytics without exposing LMS user IDs", async () => {
     const db = await getMongoDb(config);
     const now = new Date().toISOString();

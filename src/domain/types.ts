@@ -104,6 +104,27 @@ export type PactContentProgress = {
   updatedAt: string;
 };
 
+export type PactQuestionAttempt = {
+  id: string;
+  courseId: string;
+  cohortId: string;
+  squadId?: string;
+  userId: string;
+  contentId: string;
+  contentType: ContentType;
+  questionId: string;
+  questionVersion?: number;
+  attemptNumber: number;
+  answer: PactAnswerValue;
+  score: number;
+  maxScore: number;
+  isCorrect: boolean;
+  feedbackExposed: boolean;
+  feedbackExposedAt?: string;
+  submittedAt: string;
+  createdAt: string;
+};
+
 export type PactAuditEvent = {
   id: string;
   action: "squad.assignment.changed";

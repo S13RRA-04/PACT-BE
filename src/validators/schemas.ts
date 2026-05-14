@@ -67,3 +67,16 @@ export const contentProgressUpdateSchema = z.object({
   progressPercent: z.number().min(0).max(100).optional(),
   status: z.enum(["not_started", "in_progress", "submitted"]).optional()
 });
+
+export const questionAttemptSubmitSchema = z.object({
+  answer: answerValueSchema,
+  feedbackExposed: z.boolean().default(true)
+});
+
+export const questionAttemptQuerySchema = z.object({
+  cohortId: z.string().min(1).optional(),
+  contentId: z.string().min(1).optional(),
+  userId: z.string().min(1).optional(),
+  questionId: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(200)
+});

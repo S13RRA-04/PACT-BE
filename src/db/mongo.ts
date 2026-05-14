@@ -46,6 +46,9 @@ export async function ensureMongoCollections(config: AppConfig) {
   await db.collection(collectionName(config, "pactScores")).createIndex({ courseId: 1, cohortId: 1, squadId: 1 });
   await db.collection(collectionName(config, "pactContentProgress")).createIndex({ userId: 1, contentId: 1 }, { unique: true });
   await db.collection(collectionName(config, "pactContentProgress")).createIndex({ courseId: 1, cohortId: 1, userId: 1 });
+  await db.collection(collectionName(config, "pactQuestionAttempts")).createIndex({ courseId: 1, cohortId: 1, userId: 1, submittedAt: -1 });
+  await db.collection(collectionName(config, "pactQuestionAttempts")).createIndex({ userId: 1, contentId: 1, questionId: 1, submittedAt: -1 });
+  await db.collection(collectionName(config, "pactQuestionAttempts")).createIndex({ courseId: 1, cohortId: 1, contentId: 1, questionId: 1 });
   await db.collection(collectionName(config, "pactAuditEvents")).createIndex({ courseId: 1, cohortId: 1, action: 1, createdAt: -1 });
   await db.collection(collectionName(config, "pactAuditEvents")).createIndex({ actorUserId: 1, targetUserId: 1, createdAt: -1 });
 }

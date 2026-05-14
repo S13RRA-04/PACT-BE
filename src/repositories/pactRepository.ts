@@ -2,7 +2,7 @@ import type { Db } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 import { collectionName } from "../db/mongo.js";
 import { AppError } from "../errors/AppError.js";
-import type { ContentStatus, ContentType, PactAnswerValue, PactAuditEvent, PactContent, PactContentProgress, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
+import type { ContentStatus, ContentType, PactAnswerValue, PactAuditEvent, PactContent, PactContentProgress, PactQuestionAttempt, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
 
 export class PactRepository {
   constructor(private readonly db: Db, private readonly config: AppConfig) {}
@@ -419,6 +419,109 @@ export class PactRepository {
     return progress;
   }
 
+  async recordQuestionAttempt(input: {
+    user: PactUser;
+    content: PactContent;
+    questionId: string;
+    questionVersion?: number;
+    answer: PactAnswerValue;
+    score: number;
+    maxScore: number;
+    isCorrect: boolean;
+    feedbackExposed: boolean;
+  }) {
+    const now = new Date().toISOString();
+    const attemptNumber = await this.questionAttempts().countDocuments({
+      userId: input.user.id,
+      contentId: input.content.id,
+      questionId: input.questionId
+    }) + 1;
+    const attempt: PactQuestionAttempt = {
+      id: crypto.randomUUID(),
+      courseId: input.user.courseId,
+      cohortId: input.user.cohortId,
+      squadId: input.user.squadId,
+      userId: input.user.id,
+      contentId: input.content.id,
+      contentType: input.content.type,
+      questionId: input.questionId,
+      questionVersion: input.questionVersion,
+      attemptNumber,
+      answer: input.answer,
+      score: input.score,
+      maxScore: input.maxScore,
+      isCorrect: input.isCorrect,
+      feedbackExposed: input.feedbackExposed,
+      feedbackExposedAt: input.feedbackExposed ? now : undefined,
+      submittedAt: now,
+      createdAt: now
+    };
+    await this.questionAttempts().insertOne(attempt);
+    return attempt;
+  }
+
+  async listQuestionAttemptsForCohort(input: {
+    session: { role: PactRole; courseId: string; cohortId: string };
+    cohortId?: string;
+    contentId?: string;
+    userId?: string;
+    questionId?: string;
+    limit: number;
+  }) {
+    const cohortId = input.cohortId ?? input.session.cohortId;
+    const filter: Record<string, unknown> = { courseId: input.session.courseId, cohortId };
+    if (input.contentId) filter.contentId = input.contentId;
+    if (input.userId) filter.userId = input.userId;
+    if (input.questionId) filter.questionId = input.questionId;
+
+    const attempts = await this.questionAttempts()
+      .find(filter)
+      .sort({ submittedAt: -1 })
+      .limit(input.limit)
+      .toArray();
+    const [users, content] = await Promise.all([
+      this.users()
+        .find({ courseId: input.session.courseId, cohortId, id: { $in: Array.from(new Set(attempts.map((item) => item.userId))) } })
+        .project<Pick<PactUser, "id" | "name" | "email" | "squadId">>({ _id: 0, id: 1, name: 1, email: 1, squadId: 1 })
+        .toArray(),
+      this.content()
+        .find({ courseId: input.session.courseId, id: { $in: Array.from(new Set(attempts.map((item) => item.contentId))) } })
+        .project<Pick<PactContent, "id" | "title" | "questions">>({ _id: 0, id: 1, title: 1, questions: 1 })
+        .toArray()
+    ]);
+    const usersById = new Map(users.map((user) => [user.id, user]));
+    const contentById = new Map(content.map((item) => [item.id, item]));
+
+    return attempts.map((attempt) => {
+      const user = usersById.get(attempt.userId);
+      const item = contentById.get(attempt.contentId);
+      const question = item?.questions?.find((candidate) => candidate.id === attempt.questionId);
+      return {
+        id: attempt.id,
+        courseId: attempt.courseId,
+        cohortId: attempt.cohortId,
+        squadId: attempt.squadId,
+        userId: attempt.userId,
+        learnerName: user?.name,
+        learnerEmail: user?.email,
+        contentId: attempt.contentId,
+        contentTitle: item?.title,
+        contentType: attempt.contentType,
+        questionId: attempt.questionId,
+        questionTopic: question?.topic,
+        questionVersion: attempt.questionVersion,
+        attemptNumber: attempt.attemptNumber,
+        answer: attempt.answer,
+        score: attempt.score,
+        maxScore: attempt.maxScore,
+        isCorrect: attempt.isCorrect,
+        feedbackExposed: attempt.feedbackExposed,
+        feedbackExposedAt: attempt.feedbackExposedAt,
+        submittedAt: attempt.submittedAt
+      };
+    });
+  }
+
   async cohortProgressAnalytics(session: { role: PactRole; courseId: string; cohortId: string }, cohortId = session.cohortId) {
     const users = await this.users()
       .find({ courseId: session.courseId, cohortId, role: "learner" })
@@ -516,6 +619,10 @@ export class PactRepository {
 
   private contentProgress() {
     return this.db.collection<PactContentProgress>(collectionName(this.config, "pactContentProgress"));
+  }
+
+  private questionAttempts() {
+    return this.db.collection<PactQuestionAttempt>(collectionName(this.config, "pactQuestionAttempts"));
   }
 
   private auditEvents() {
