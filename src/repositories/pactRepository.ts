@@ -56,6 +56,23 @@ export class PactRepository {
   }
 
   async listContentFor(user: PactUser) {
+    if (user.role === "admin") {
+      return this.content()
+        .find({ courseId: user.courseId })
+        .sort({ type: 1, title: 1 })
+        .toArray();
+    }
+
+    if (user.role === "instructor") {
+      return this.content()
+        .find({
+          courseId: user.courseId,
+          $or: [{ cohortId: user.cohortId }, { cohortId: { $exists: false } }]
+        })
+        .sort({ type: 1, title: 1 })
+        .toArray();
+    }
+
     return this.content()
       .find({
         courseId: user.courseId,

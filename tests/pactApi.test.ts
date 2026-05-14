@@ -56,7 +56,7 @@ afterAll(async () => {
 });
 
 describe("PACT API", () => {
-  it("serves role and cohort scoped content", async () => {
+  it("serves role and cohort scoped content to learners", async () => {
     const db = await getMongoDb(config);
     await db.collection("test_pactUsers").insertOne({
       id: "user-1",
@@ -91,6 +91,78 @@ describe("PACT API", () => {
     expect(response.body[0].id).toBe("content-1");
   });
 
+  it("serves all scoped content to admins and instructors for review", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactUsers").updateOne(
+      { id: "admin-visible" },
+      {
+        $set: {
+          id: "admin-visible",
+          lmsUserId: "lms-admin-visible",
+          role: "admin",
+          courseId: "pact",
+          cohortId: "cohort-a",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      },
+      { upsert: true }
+    );
+    await db.collection("test_pactUsers").updateOne(
+      { id: "instructor-visible" },
+      {
+        $set: {
+          id: "instructor-visible",
+          lmsUserId: "lms-instructor-visible",
+          role: "instructor",
+          courseId: "pact",
+          cohortId: "cohort-a",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      },
+      { upsert: true }
+    );
+    await db.collection("test_pactContent").insertMany([
+      publishedContent("admin-visible-draft", "cohort-a", "learner", "draft"),
+      publishedContent("admin-visible-assessment", "cohort-a", "learner", "published", "assessment"),
+      publishedContent("admin-visible-other-cohort", "cohort-b", "learner", "draft")
+    ]);
+
+    const adminToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "admin-visible",
+      role: "admin",
+      courseId: "pact",
+      cohortId: "cohort-a"
+    });
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "instructor-visible",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-a"
+    });
+
+    const adminResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content")
+      .set("authorization", `Bearer ${adminToken}`)
+      .expect(200);
+    const instructorResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .expect(200);
+
+    expect(adminResponse.body.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining([
+      "admin-visible-draft",
+      "admin-visible-assessment",
+      "admin-visible-other-cohort"
+    ]));
+    expect(instructorResponse.body.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining([
+      "admin-visible-draft",
+      "admin-visible-assessment"
+    ]));
+    expect(instructorResponse.body.some((item: { id: string }) => item.id === "admin-visible-other-cohort")).toBe(false);
+  });
+
   it("records scores and returns scoreboard entries", async () => {
     const token = await new SessionService(config.pactSessionSecret).sign({
       userId: "user-1",
@@ -114,7 +186,7 @@ describe("PACT API", () => {
     expect(response.body.entries[0]).toMatchObject({ userId: "user-1", totalScore: 8, maxScore: 10, progressPercent: 100 });
   });
 
-  it("lets admins and instructors gate module availability", async () => {
+  it("lets admins and instructors gate content availability", async () => {
     const db = await getMongoDb(config);
     await db.collection("test_pactContent").updateOne(
       { id: "content-gated" },
@@ -212,6 +284,16 @@ describe("PACT API", () => {
       returnUrl: "http://lms.example.test/api/v1/lti/deep-linking/return"
     });
     expect(response.body.jwt).toEqual(expect.any(String));
+    const deepLinkPayload = JSON.parse(Buffer.from(response.body.jwt.split(".")[1], "base64url").toString("utf8"));
+    expect(deepLinkPayload["https://purl.imsglobal.org/spec/lti-dl/claim/content_items"]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "PACT Assessments",
+          url: "http://localhost:4100/launch/assessment",
+          lineItem: expect.objectContaining({ resourceId: "pact-assessment-hub", tag: "assessment" })
+        })
+      ])
+    );
   });
 
   it("maps unavailable LMS JWKS to an explicit LTI platform error", async () => {
@@ -296,14 +378,14 @@ async function signResourceLaunch() {
     .sign(platformPrivateKey);
 }
 
-function publishedContent(id: string, cohortId: string, role: "learner" | "admin", status = "published") {
+function publishedContent(id: string, cohortId: string, role: "learner" | "admin", status = "published", type = "module") {
   const now = new Date().toISOString();
   return {
     id,
     courseId: "pact",
     cohortId,
     role,
-    type: "module",
+    type,
     title: id,
     prompt: "Answer the prompt",
     maxScore: 10,

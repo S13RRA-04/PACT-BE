@@ -23,7 +23,7 @@ export const contentCreateSchema = z.object({
   courseId: z.string().min(1),
   cohortId: z.string().min(1).optional(),
   role: z.enum(["admin", "instructor", "learner", "all"]).default("all"),
-  type: z.enum(["module", "challenge", "game"]),
+  type: z.enum(["module", "challenge", "game", "assessment"]),
   title: z.string().min(1).max(200),
   prompt: z.string().min(1).max(4000),
   maxScore: z.number().nonnegative(),

@@ -1,5 +1,5 @@
 export type PactRole = "admin" | "instructor" | "learner";
-export type ContentType = "module" | "challenge" | "game";
+export type ContentType = "module" | "challenge" | "game" | "assessment";
 export type ContentStatus = "draft" | "published" | "archived";
 
 export type PactUser = {

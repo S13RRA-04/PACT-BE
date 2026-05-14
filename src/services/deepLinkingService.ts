@@ -31,7 +31,8 @@ export class DeepLinkingService {
     const contentItems = [
       contentItem("pact-module-hub", "PACT Modules", `${this.config.appBaseUrl}/launch/module`, 100, "module"),
       contentItem("pact-challenge-hub", "PACT Squad Challenges", `${this.config.appBaseUrl}/launch/challenge`, 100, "challenge"),
-      contentItem("pact-game-hub", "PACT Games", `${this.config.appBaseUrl}/launch/game`, 100, "game")
+      contentItem("pact-game-hub", "PACT Games", `${this.config.appBaseUrl}/launch/game`, 100, "game"),
+      contentItem("pact-assessment-hub", "PACT Assessments", `${this.config.appBaseUrl}/launch/assessment`, 100, "assessment")
     ];
 
     const privateKey = this.config.pactToolPrivateKeyPem;

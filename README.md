@@ -85,13 +85,13 @@ Use `--cohort-id <cohort>` when modules should be scoped to a specific LMS cohor
 ## API surface
 
 - `POST /api/v1/lti/launch` validates an LMS `id_token`, syncs the PACT user, and returns a PACT session token.
-- `GET /api/v1/content` returns published modules, challenges, and games for the launched user role and cohort.
-- `POST /api/v1/scores` records a module/game/challenge score and publishes to LMS AGS when possible.
+- `GET /api/v1/content` returns published modules, challenges, games, and assessments for launched learners. Administrator sessions can review all course content; instructor sessions can review all content in their launched cohort plus global course content.
+- `POST /api/v1/scores` records a module, game, challenge, or assessment score and publishes to LMS AGS when possible.
 - `GET /api/v1/dashboard/scoreboard` returns per-user score and progress summaries for the user's course/cohort/squad.
 - `POST /api/v1/admin/squads` creates squads for a course cohort.
 - `PATCH /api/v1/admin/users/:userId/squad` assigns a learner to a squad.
 - `POST /api/v1/admin/content` creates or updates PACT content.
-- `GET /api/v1/admin/content` lists course modules for administrator/instructor gating.
-- `PATCH /api/v1/admin/content/:contentId/status` changes a module between `draft`, `published`, and `archived`.
+- `GET /api/v1/admin/content` lists course content for administrator/instructor gating.
+- `PATCH /api/v1/admin/content/:contentId/status` changes content between `draft`, `published`, and `archived`.
 
 Protected PACT endpoints use the bearer session token returned from LTI launch. Squad administration requires `admin`; content gating requires `admin` or `instructor`.
