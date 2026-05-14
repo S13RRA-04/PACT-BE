@@ -94,7 +94,16 @@ function assertWorkerCompatibleMongoUri(mongoUri: string, nodeEnv: "development"
     throw new Error("MONGO_URI must use MongoDB database-user credentials for Cloudflare Worker-compatible deployments; X.509 certificate-file auth is not supported.");
   }
 
-  if (nodeEnv === "production" && !/^mongodb(\+srv)?:\/\/[^:/@]+:[^@]+@/i.test(mongoUri)) {
+  if (nodeEnv === "production" && !isLoopbackMongoUri(mongoUri) && !/^mongodb(\+srv)?:\/\/[^:/@]+:[^@]+@/i.test(mongoUri)) {
     throw new Error("MONGO_URI must include MongoDB database-user credentials.");
+  }
+}
+
+function isLoopbackMongoUri(mongoUri: string) {
+  try {
+    const url = new URL(mongoUri);
+    return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
   }
 }

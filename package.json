@@ -9,8 +9,10 @@
     "start": "node dist/src/server.js",
     "db:ensure": "tsx src/db/ensureMongo.ts",
     "modules:import": "tsx src/content/importPactModules.ts",
-    "deploy:worker:staging": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-worker-staging.ps1",
-    "deploy:worker:production": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-worker-production.ps1",
+    "deploy:staging": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-worker-staging.ps1",
+    "deploy:production": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-worker-production.ps1",
+    "deploy:worker:staging": "npm run deploy:staging",
+    "deploy:worker:production": "npm run deploy:production",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
