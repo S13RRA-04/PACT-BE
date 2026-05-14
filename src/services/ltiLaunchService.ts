@@ -16,7 +16,9 @@ type LtiLaunchPayload = JWTPayload & {
   given_name?: string;
   family_name?: string;
   "https://purl.imsglobal.org/spec/lti/claim/message_type"?: string;
+  "https://purl.imsglobal.org/spec/lti/claim/version"?: string;
   "https://purl.imsglobal.org/spec/lti/claim/deployment_id"?: string;
+  "https://purl.imsglobal.org/spec/lti/claim/target_link_uri"?: string;
   "https://purl.imsglobal.org/spec/lti/claim/roles"?: string[];
   "https://purl.imsglobal.org/spec/lti/claim/context"?: { id?: string; label?: string; title?: string };
   "https://purl.imsglobal.org/spec/lti/claim/custom"?: Record<string, string>;
@@ -51,6 +53,12 @@ export class LtiLaunchService {
       throw new AppError(400, "INVALID_LTI_MESSAGE", "Unsupported LTI message type");
     }
 
+    this.assertBaseLtiClaims(payload, "resource");
+    const resourceLink = payload["https://purl.imsglobal.org/spec/lti/claim/resource_link"];
+    if (!resourceLink?.id) {
+      throw new AppError(400, "RESOURCE_LINK_REQUIRED", "LTI launch must include a resource link");
+    }
+
     const deploymentId = payload["https://purl.imsglobal.org/spec/lti/claim/deployment_id"];
     if (!deploymentId || !this.config.pactLtiDeploymentIds.includes(deploymentId)) {
       throw new AppError(401, "INVALID_DEPLOYMENT", "LTI deployment is not trusted");
@@ -73,6 +81,17 @@ export class LtiLaunchService {
       courseId,
       cohortId
     });
+    const ags = payload["https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"];
+    if (ags?.lineitems || ags?.lineitem || ags?.scope?.length) {
+      await this.repository.upsertAgsContext({
+        userId: user.id,
+        courseId: user.courseId,
+        cohortId: user.cohortId,
+        lineItemsUrl: ags.lineitems,
+        lineItemUrl: ags.lineitem,
+        scopes: ags.scope ?? []
+      });
+    }
 
     const sessionToken = await this.sessions.sign({
       userId: user.id,
@@ -87,7 +106,7 @@ export class LtiLaunchService {
     return {
       sessionToken,
       user,
-      ags: payload["https://purl.imsglobal.org/spec/lti-ags/claim/endpoint"],
+      ags,
       resourceLink: payload["https://purl.imsglobal.org/spec/lti/claim/resource_link"]
     };
   }
@@ -98,6 +117,8 @@ export class LtiLaunchService {
     if (payload["https://purl.imsglobal.org/spec/lti/claim/message_type"] !== "LtiDeepLinkingRequest") {
       throw new AppError(400, "INVALID_LTI_MESSAGE", "Unsupported LTI message type");
     }
+
+    this.assertBaseLtiClaims(payload, "deep-link");
 
     const deploymentId = payload["https://purl.imsglobal.org/spec/lti/claim/deployment_id"];
     if (!deploymentId || !this.config.pactLtiDeploymentIds.includes(deploymentId)) {
@@ -136,6 +157,46 @@ export class LtiLaunchService {
 
       throw error;
     }
+  }
+
+  private assertBaseLtiClaims(payload: LtiLaunchPayload, launchKind: "resource" | "deep-link") {
+    if (payload["https://purl.imsglobal.org/spec/lti/claim/version"] !== "1.3.0") {
+      throw new AppError(400, "INVALID_LTI_VERSION", "LTI launch must use version 1.3.0");
+    }
+
+    const targetLinkUri = payload["https://purl.imsglobal.org/spec/lti/claim/target_link_uri"];
+    if (!targetLinkUri || !this.isAllowedTargetLinkUri(targetLinkUri, launchKind)) {
+      throw new AppError(400, "TARGET_LINK_REQUIRED", "LTI launch must include a valid target link URI");
+    }
+
+    const context = payload["https://purl.imsglobal.org/spec/lti/claim/context"];
+    if (!context?.id) {
+      throw new AppError(400, "CONTEXT_REQUIRED", "LTI launch must include a context identifier");
+    }
+  }
+
+  private isAllowedTargetLinkUri(value: string, launchKind: "resource" | "deep-link") {
+    let target: URL;
+    try {
+      target = new URL(value);
+    } catch {
+      return false;
+    }
+
+    const appBase = new URL(this.config.appBaseUrl);
+    if (target.origin !== appBase.origin) {
+      return false;
+    }
+
+    if (launchKind === "deep-link") {
+      return target.pathname === "/api/v1/lti/deep-link"
+        || (this.config.pactAllowLegacyLtiPaths && target.pathname === "/lti/deep-link");
+    }
+
+    return target.pathname === "/launch"
+      || /^\/launch\/(module|challenge|game|assessment)$/.test(target.pathname)
+      || target.pathname === "/api/v1/lti/launch"
+      || (this.config.pactAllowLegacyLtiPaths && target.pathname === "/lti/launch");
   }
 }
 

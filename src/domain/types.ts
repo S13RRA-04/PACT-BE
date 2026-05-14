@@ -45,6 +45,18 @@ export type PactContent = {
   updatedAt: string;
 };
 
+export type PactAgsContext = {
+  id: string;
+  courseId: string;
+  cohortId: string;
+  userId: string;
+  lineItemsUrl?: string;
+  lineItemUrl?: string;
+  scopes: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PactQuestion = {
   id: string;
   version: number;
@@ -61,6 +73,9 @@ export type PactQuestion = {
     points: number;
     difficulty: string;
     mustPass: boolean;
+    optional?: boolean;
+    maxAttempts?: number;
+    gradingMode?: "automatic" | "manual";
   };
   status: ContentStatus;
   createdAt: string;
@@ -78,7 +93,54 @@ export type PactScore = {
   score: number;
   maxScore: number;
   progressPercent: number;
-  agsStatus: "pending" | "published" | "failed" | "not_applicable";
+  agsStatus: "not_ready" | "pending" | "published" | "failed" | "not_applicable";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PactAgsPublishAttempt = {
+  id: string;
+  courseId: string;
+  cohortId: string;
+  squadId?: string;
+  userId: string;
+  contentId: string;
+  lineItemUrl?: string;
+  score: number;
+  maxScore: number;
+  progressPercent: number;
+  status: "pending" | "published" | "failed" | "retry_exhausted" | "not_applicable" | "skipped_duplicate";
+  retryCount?: number;
+  nextRetryAt?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type PactAssignmentCompletion = {
+  complete: boolean;
+  status: "in_progress" | "pending_manual" | "failed_must_pass" | "complete";
+  requiredQuestionIds: string[];
+  answeredRequiredQuestionIds: string[];
+  pendingQuestionIds: string[];
+  pendingManualQuestionIds: string[];
+  failedMustPassQuestionIds: string[];
+  exhaustedQuestionIds: string[];
+  score: number;
+  maxScore: number;
+};
+
+export type PactNotification = {
+  id: string;
+  event: "ags.retry_exhausted";
+  sinkUrl: string;
+  payload: Record<string, unknown>;
+  status: "pending" | "delivered" | "dead_letter";
+  attemptCount: number;
+  nextAttemptAt: string;
+  lastStatus?: number;
+  lastError?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -125,17 +187,50 @@ export type PactQuestionAttempt = {
   createdAt: string;
 };
 
+export type PactQuestionGrade = {
+  id: string;
+  courseId: string;
+  cohortId: string;
+  squadId?: string;
+  userId: string;
+  contentId: string;
+  questionId: string;
+  attemptId: string;
+  score: number;
+  maxScore: number;
+  isCorrect: boolean;
+  feedback?: string;
+  gradedByUserId: string;
+  gradedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PactAuditEvent = {
   id: string;
-  action: "squad.assignment.changed";
+  action: "squad.assignment.changed" | "question.manual_grade.upserted" | "ags.queue.process_due.triggered";
   actorUserId: string;
   targetUserId: string;
   courseId: string;
   cohortId: string;
   metadata: {
     previousSquadId?: string;
-    nextSquadId: string;
+    nextSquadId?: string;
     nextSquadNumber?: SquadNumber;
+    contentId?: string;
+    questionId?: string;
+    attemptId?: string;
+    previousScore?: number;
+    nextScore?: number;
+    maxScore?: number;
+    previousIsCorrect?: boolean;
+    nextIsCorrect?: boolean;
+    feedbackChanged?: boolean;
+    scanned?: number;
+    retried?: number;
+    failed?: number;
+    exhausted?: number;
+    limit?: number;
   };
   createdAt: string;
 };

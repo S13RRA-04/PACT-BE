@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/server.js",
     "db:ensure": "tsx src/db/ensureMongo.ts",
+    "db:migrate:scoring": "tsx src/db/migrateScoringFields.ts",
     "modules:import": "tsx src/content/importPactModules.ts",
     "modules:import:production": "tsx src/content/importPactModulesProduction.ts",
     "deploy:staging": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-worker-staging.ps1",

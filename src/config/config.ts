@@ -21,7 +21,20 @@ const envSchema = z.object({
   PACT_SESSION_SECRET: z.string().min(16),
   PACT_TOOL_KID: z.string().min(1).optional(),
   PACT_TOOL_PRIVATE_KEY_PEM: z.string().optional(),
-  CORS_ORIGINS: z.string().default("")
+  PACT_ALLOW_LEGACY_LTI_PATHS: booleanEnvSchema(true),
+  CORS_ORIGINS: z.string().default(""),
+  AGS_AUTO_RETRY_ENABLED: booleanEnvSchema(true),
+  AGS_AUTO_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(0).max(10).default(3),
+  AGS_AUTO_RETRY_INITIAL_DELAY_MS: z.coerce.number().int().min(1000).default(30000),
+  AGS_AUTO_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(1000).default(300000),
+  AGS_ATTEMPT_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
+  AGS_RETENTION_CLEANUP_INTERVAL_MS: z.coerce.number().int().min(60000).default(86400000),
+  AGS_RETRY_EXHAUSTED_WEBHOOK_URLS: z.string().default(""),
+  AGS_RETRY_EXHAUSTED_WEBHOOK_BEARER_TOKEN: z.string().min(1).optional(),
+  AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+  AGS_RETRY_EXHAUSTED_WEBHOOK_INITIAL_DELAY_MS: z.coerce.number().int().min(1000).default(60000),
+  AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_DELAY_MS: z.coerce.number().int().min(1000).default(3600000),
+  AGS_PROCESS_DUE_SCHEDULER_SECRET: optionalTrimmedString(16)
 });
 
 export type AppConfig = {
@@ -41,7 +54,20 @@ export type AppConfig = {
   pactSessionSecret: string;
   pactToolKid?: string;
   pactToolPrivateKeyPem?: string;
+  pactAllowLegacyLtiPaths: boolean;
   corsOrigins: string[];
+  agsAutoRetryEnabled: boolean;
+  agsAutoRetryMaxAttempts: number;
+  agsAutoRetryInitialDelayMs: number;
+  agsAutoRetryMaxDelayMs: number;
+  agsAttemptRetentionDays: number;
+  agsRetentionCleanupIntervalMs: number;
+  agsRetryExhaustedWebhookUrls: string[];
+  agsRetryExhaustedWebhookBearerToken?: string;
+  agsRetryExhaustedWebhookMaxAttempts: number;
+  agsRetryExhaustedWebhookInitialDelayMs: number;
+  agsRetryExhaustedWebhookMaxDelayMs: number;
+  agsProcessDueSchedulerSecret?: string;
 };
 
 export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
@@ -76,7 +102,20 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     pactSessionSecret: parsed.PACT_SESSION_SECRET,
     pactToolKid: parsed.PACT_TOOL_KID,
     pactToolPrivateKeyPem: parsed.PACT_TOOL_PRIVATE_KEY_PEM?.replace(/\\n/g, "\n"),
-    corsOrigins: parsed.CORS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
+    pactAllowLegacyLtiPaths: parsed.PACT_ALLOW_LEGACY_LTI_PATHS,
+    corsOrigins: parsed.CORS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
+    agsAutoRetryEnabled: parsed.AGS_AUTO_RETRY_ENABLED,
+    agsAutoRetryMaxAttempts: parsed.AGS_AUTO_RETRY_MAX_ATTEMPTS,
+    agsAutoRetryInitialDelayMs: parsed.AGS_AUTO_RETRY_INITIAL_DELAY_MS,
+    agsAutoRetryMaxDelayMs: Math.max(parsed.AGS_AUTO_RETRY_INITIAL_DELAY_MS, parsed.AGS_AUTO_RETRY_MAX_DELAY_MS),
+    agsAttemptRetentionDays: parsed.AGS_ATTEMPT_RETENTION_DAYS,
+    agsRetentionCleanupIntervalMs: parsed.AGS_RETENTION_CLEANUP_INTERVAL_MS,
+    agsRetryExhaustedWebhookUrls: parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_URLS.split(",").map((url) => url.trim()).filter(Boolean),
+    agsRetryExhaustedWebhookBearerToken: parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_BEARER_TOKEN,
+    agsRetryExhaustedWebhookMaxAttempts: parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_ATTEMPTS,
+    agsRetryExhaustedWebhookInitialDelayMs: parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_INITIAL_DELAY_MS,
+    agsRetryExhaustedWebhookMaxDelayMs: Math.max(parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_INITIAL_DELAY_MS, parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_DELAY_MS),
+    agsProcessDueSchedulerSecret: parsed.AGS_PROCESS_DUE_SCHEDULER_SECRET
   };
 }
 
@@ -126,4 +165,24 @@ function assertPactMongoDatabaseName(databaseName: string) {
 
 function normalizeDatabaseName(databaseName: string) {
   return databaseName.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function booleanEnvSchema(defaultValue: boolean) {
+  return z.preprocess((value) => {
+    if (value === undefined) return defaultValue;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "1", "yes", "on"].includes(normalized)) return true;
+      if (["false", "0", "no", "off"].includes(normalized)) return false;
+    }
+    return value;
+  }, z.boolean());
+}
+
+function optionalTrimmedString(minLength: number) {
+  return z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : undefined;
+  }, z.string().min(minLength).optional());
 }

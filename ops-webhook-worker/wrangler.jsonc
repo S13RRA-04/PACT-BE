@@ -1,0 +1,40 @@
+{
+	"$schema": "../node_modules/wrangler/config-schema.json",
+	"name": "cetu-ops-webhook",
+	"main": "src/index.js",
+	"compatibility_date": "2026-05-14",
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1
+	},
+	"env": {
+		"staging": {
+			"name": "cetu-ops-webhook-staging",
+			"triggers": {
+				"crons": [
+					"*/5 * * * *"
+				]
+			},
+			"kv_namespaces": [
+				{
+					"binding": "ALERTS_KV",
+					"id": "f3777cf38a064f86b6fad9edb428bafb"
+				}
+			]
+		},
+		"production": {
+			"name": "cetu-ops-webhook",
+			"triggers": {
+				"crons": [
+					"*/5 * * * *"
+				]
+			},
+			"kv_namespaces": [
+				{
+					"binding": "ALERTS_KV",
+					"id": "16ce7519669a4ec38b8d8c9bf765c781"
+				}
+			]
+		}
+	}
+}

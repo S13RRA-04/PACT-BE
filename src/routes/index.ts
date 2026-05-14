@@ -1,14 +1,16 @@
+import { timingSafeEqual } from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import type { AppConfig } from "../config/config.js";
 import { getMongoDb } from "../db/mongo.js";
 import { currentSession, requireCsrfForCookieSession, requirePactRole, sessionCookie } from "../middleware/currentSession.js";
 import { LmsAgsClient } from "../integrations/lmsAgsClient.js";
+import { LmsTokenClient } from "../integrations/lmsTokenClient.js";
 import { PactRepository } from "../repositories/pactRepository.js";
 import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 import type { ContentType } from "../domain/types.js";
 
@@ -42,6 +44,16 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.post("/ops/ags-publish-attempts/process-due", async (req, res, next) => {
+    try {
+      requireSchedulerSecret(config, req);
+      const input = schedulerAgsProcessDueSchema.parse(req.body ?? {});
+      res.status(200).json(await pactService(config).then((service) => service.retryDueAgsPublishAttempts(input.limit)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.use(currentSession(config));
   router.use(requireCsrfForCookieSession);
 
@@ -56,6 +68,17 @@ export function createApiRouter(config: AppConfig) {
   router.get("/content/progress", async (req, res, next) => {
     try {
       res.status(200).json({ progress: await pactService(config).then((service) => service.getContentProgress(requireSession(req))) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/content/:contentId/completion", async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.getContentCompletionStatus(
+        requireSession(req),
+        req.params.contentId
+      )));
     } catch (error) {
       next(error);
     }
@@ -131,7 +154,11 @@ export function createApiRouter(config: AppConfig) {
   router.get("/admin/audit-events", requirePactRole("admin"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);
-      res.status(200).json({ events: await repository.listAdminAuditEvents(requireSession(req)) });
+      const query = auditEventQuerySchema.parse(req.query);
+      res.status(200).json({ events: await repository.listAdminAuditEvents({
+        session: requireSession(req),
+        ...query
+      }) });
     } catch (error) {
       next(error);
     }
@@ -186,6 +213,73 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/admin/diagnostics/ags-token-context", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.getAgsTokenContextDiagnostic(requireSession(req))));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/diagnostics/ags-publish-attempts", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      const query = agsPublishAttemptQuerySchema.parse(req.query);
+      res.status(200).json(await repository.listAgsPublishAttemptsForDiagnostics({
+          session: requireSession(req),
+          ...query
+        }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/diagnostics/notifications", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      const query = notificationDiagnosticQuerySchema.parse(req.query);
+      res.status(200).json({ notifications: await repository.listNotificationsForDiagnostics(query) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/diagnostics/ags-publish-attempts/export.csv", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      const query = agsPublishAttemptExportQuerySchema.parse(req.query);
+      const attempts = await repository.listAgsPublishAttemptsForExport({
+        session: requireSession(req),
+        ...query
+      });
+      res.setHeader("content-type", "text/csv; charset=utf-8");
+      res.setHeader("content-disposition", "attachment; filename=\"ags-publish-attempts.csv\"");
+      res.status(200).send(toAgsAttemptsCsv(attempts));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/diagnostics/ags-publish-attempts/process-due", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.processDueAgsPublishAttemptsForAdmin(requireSession(req))));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/diagnostics/ags-publish-attempts/:attemptId/retry", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.retryAgsPublishAttempt(
+        requireSession(req),
+        req.params.attemptId,
+        agsPublishRetrySchema.parse(req.body)
+      )));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/admin/analytics/cohort-progress", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       const cohortId = typeof req.query.cohortId === "string" && req.query.cohortId.trim() ? req.query.cohortId.trim() : undefined;
@@ -201,6 +295,18 @@ export function createApiRouter(config: AppConfig) {
       res.status(200).json({
         attempts: await pactService(config).then((service) => service.getQuestionAttempts(requireSession(req), query))
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/analytics/question-attempts/:attemptId/grade", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.gradeManualQuestionAttempt(
+        requireSession(req),
+        req.params.attemptId,
+        manualQuestionGradeSchema.parse(req.body)
+      )));
     } catch (error) {
       next(error);
     }
@@ -269,7 +375,11 @@ export function ltiLaunchHandler(config: AppConfig) {
   };
 }
 
-function parseLaunchContentType(value: string | undefined): ContentType {
+function parseLaunchContentType(value: string | undefined): ContentType | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
   if (value === "module" || value === "challenge" || value === "game" || value === "assessment") {
     return value;
   }
@@ -292,10 +402,58 @@ async function pactRepository(config: AppConfig) {
 }
 
 async function pactService(config: AppConfig) {
-  return new PactService(await pactRepository(config), new LmsAgsClient());
+  return new PactService(await pactRepository(config), new LmsAgsClient(), new LmsTokenClient(config), config);
 }
 
 function requireSession(req: Express.Request) {
   if (!req.pactSession) throw new AppError(401, "AUTH_REQUIRED", "Authentication is required");
   return req.pactSession;
+}
+
+function requireSchedulerSecret(config: AppConfig, req: Request) {
+  if (!config.agsProcessDueSchedulerSecret) {
+    throw new AppError(404, "SCHEDULER_NOT_CONFIGURED", "Scheduler processing is not configured");
+  }
+  const authorization = req.header("authorization") ?? "";
+  const token = authorization.match(/^Bearer\s+(.+)$/i)?.[1] ?? req.header("x-pact-scheduler-secret") ?? "";
+  if (!timingSafeStringEqual(token, config.agsProcessDueSchedulerSecret)) {
+    throw new AppError(401, "SCHEDULER_UNAUTHORIZED", "Scheduler authentication failed");
+  }
+}
+
+function timingSafeStringEqual(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function toAgsAttemptsCsv(attempts: Array<Record<string, unknown>>) {
+  const headers = [
+    "id",
+    "courseId",
+    "cohortId",
+    "squadId",
+    "userId",
+    "contentId",
+    "lineItemUrl",
+    "score",
+    "maxScore",
+    "progressPercent",
+    "status",
+    "retryCount",
+    "nextRetryAt",
+    "errorCode",
+    "errorMessage",
+    "createdAt"
+  ];
+  return [
+    headers.join(","),
+    ...attempts.map((attempt) => headers.map((header) => csvCell(attempt[header])).join(","))
+  ].join("\n");
+}
+
+function csvCell(value: unknown) {
+  if (value === undefined || value === null) return "";
+  const text = String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
 }

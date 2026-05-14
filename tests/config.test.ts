@@ -20,6 +20,68 @@ describe("config", () => {
     expect(config.mongoCollectionPrefix).toBe("");
   });
 
+  it("parses AGS retry exhausted notification sinks", () => {
+    const config = loadConfig({
+      NODE_ENV: "production",
+      APP_BASE_URL: "https://pact2-api.cetu.online",
+      MONGO_URI: "mongodb://user:password@localhost:27017",
+      LMS_API_BASE_URL: "https://lms-api.cetu.online",
+      LMS_PLATFORM_ISSUER: "https://lms-api.cetu.online",
+      LMS_PLATFORM_JWKS_URI: "https://lms-api.cetu.online/api/v1/lti/jwks",
+      LMS_DEEP_LINK_RETURN_URL: "https://lms-api.cetu.online/api/v1/lti/deep-linking/return",
+      PACT_LTI_CLIENT_ID: "pact-tool",
+      PACT_LTI_DEPLOYMENT_IDS: "pact-course-deployment",
+      PACT_SESSION_SECRET: "test-secret-with-enough-length",
+      AGS_RETRY_EXHAUSTED_WEBHOOK_URLS: "https://ops.example.test/ags, https://backup.example.test/ags",
+      AGS_RETRY_EXHAUSTED_WEBHOOK_BEARER_TOKEN: "notification-token",
+      AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_ATTEMPTS: "7",
+      AGS_RETRY_EXHAUSTED_WEBHOOK_INITIAL_DELAY_MS: "5000",
+      AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_DELAY_MS: "60000"
+    });
+
+    expect(config.agsRetryExhaustedWebhookUrls).toEqual(["https://ops.example.test/ags", "https://backup.example.test/ags"]);
+    expect(config.agsRetryExhaustedWebhookBearerToken).toBe("notification-token");
+    expect(config.agsRetryExhaustedWebhookMaxAttempts).toBe(7);
+    expect(config.agsRetryExhaustedWebhookInitialDelayMs).toBe(5000);
+    expect(config.agsRetryExhaustedWebhookMaxDelayMs).toBe(60000);
+  });
+
+  it("can disable legacy LTI target link paths after registrations migrate", () => {
+    const config = loadConfig({
+      NODE_ENV: "production",
+      APP_BASE_URL: "https://pact2-api.cetu.online",
+      MONGO_URI: "mongodb://user:password@localhost:27017",
+      LMS_API_BASE_URL: "https://lms-api.cetu.online",
+      LMS_PLATFORM_ISSUER: "https://lms-api.cetu.online",
+      LMS_PLATFORM_JWKS_URI: "https://lms-api.cetu.online/api/v1/lti/jwks",
+      LMS_DEEP_LINK_RETURN_URL: "https://lms-api.cetu.online/api/v1/lti/deep-linking/return",
+      PACT_LTI_CLIENT_ID: "pact-tool",
+      PACT_LTI_DEPLOYMENT_IDS: "pact-course-deployment",
+      PACT_SESSION_SECRET: "test-secret-with-enough-length",
+      PACT_ALLOW_LEGACY_LTI_PATHS: "false"
+    });
+
+    expect(config.pactAllowLegacyLtiPaths).toBe(false);
+  });
+
+  it("parses the external AGS process-due scheduler secret", () => {
+    const config = loadConfig({
+      NODE_ENV: "production",
+      APP_BASE_URL: "https://pact2-api.cetu.online",
+      MONGO_URI: "mongodb://user:password@localhost:27017",
+      LMS_API_BASE_URL: "https://lms-api.cetu.online",
+      LMS_PLATFORM_ISSUER: "https://lms-api.cetu.online",
+      LMS_PLATFORM_JWKS_URI: "https://lms-api.cetu.online/api/v1/lti/jwks",
+      LMS_DEEP_LINK_RETURN_URL: "https://lms-api.cetu.online/api/v1/lti/deep-linking/return",
+      PACT_LTI_CLIENT_ID: "pact-tool",
+      PACT_LTI_DEPLOYMENT_IDS: "pact-course-deployment",
+      PACT_SESSION_SECRET: "test-secret-with-enough-length",
+      AGS_PROCESS_DUE_SCHEDULER_SECRET: "scheduler-secret-with-enough-length"
+    });
+
+    expect(config.agsProcessDueSchedulerSecret).toBe("scheduler-secret-with-enough-length");
+  });
+
   it("rejects LMS or Keycloak database names for PACT persistence", () => {
     const baseEnv = {
       NODE_ENV: "production",

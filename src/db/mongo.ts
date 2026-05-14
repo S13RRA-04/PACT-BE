@@ -49,6 +49,15 @@ export async function ensureMongoCollections(config: AppConfig) {
   await db.collection(collectionName(config, "pactQuestionAttempts")).createIndex({ courseId: 1, cohortId: 1, userId: 1, submittedAt: -1 });
   await db.collection(collectionName(config, "pactQuestionAttempts")).createIndex({ userId: 1, contentId: 1, questionId: 1, submittedAt: -1 });
   await db.collection(collectionName(config, "pactQuestionAttempts")).createIndex({ courseId: 1, cohortId: 1, contentId: 1, questionId: 1 });
+  await db.collection(collectionName(config, "pactQuestionGrades")).createIndex({ attemptId: 1 }, { unique: true });
+  await db.collection(collectionName(config, "pactQuestionGrades")).createIndex({ courseId: 1, cohortId: 1, contentId: 1, questionId: 1 });
   await db.collection(collectionName(config, "pactAuditEvents")).createIndex({ courseId: 1, cohortId: 1, action: 1, createdAt: -1 });
   await db.collection(collectionName(config, "pactAuditEvents")).createIndex({ actorUserId: 1, targetUserId: 1, createdAt: -1 });
+  await db.collection(collectionName(config, "pactAgsPublishAttempts")).createIndex({ courseId: 1, cohortId: 1, contentId: 1, userId: 1, createdAt: -1 });
+  await db.collection(collectionName(config, "pactAgsPublishAttempts")).createIndex({ status: 1, createdAt: -1 });
+  await db.collection(collectionName(config, "pactAgsPublishAttempts")).createIndex({ status: 1, nextRetryAt: 1 });
+  await db.collection(collectionName(config, "pactAgsContexts")).createIndex({ userId: 1, courseId: 1, cohortId: 1 }, { unique: true });
+  await db.collection(collectionName(config, "pactAgsContexts")).createIndex({ courseId: 1, cohortId: 1, updatedAt: -1 });
+  await db.collection(collectionName(config, "pactNotifications")).createIndex({ status: 1, nextAttemptAt: 1 });
+  await db.collection(collectionName(config, "pactNotifications")).createIndex({ event: 1, createdAt: -1 });
 }
