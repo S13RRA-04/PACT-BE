@@ -717,6 +717,75 @@ describe("PACT API", () => {
     expect(response.body.entries[0]).toMatchObject({ userId: "user-1", totalScore: 8, maxScore: 10, progressPercent: 100 });
   });
 
+  it("persists learner content progress separately from score submission", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactContent").updateOne(
+      { id: "progress-content" },
+      {
+        $set: {
+          ...publishedContent("progress-content", "cohort-a", "learner", "published", "module"),
+          questionCount: 2,
+          questions: [
+            { id: "progress-q1", scoring: { points: 5, difficulty: "easy", mustPass: false } },
+            { id: "progress-q2", scoring: { points: 5, difficulty: "easy", mustPass: false } }
+          ]
+        }
+      },
+      { upsert: true }
+    );
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "user-1",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-a",
+      squadId: "squad-1"
+    });
+
+    const progressResponse = await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/progress-content/progress")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        answers: {
+          "progress-q1": "selected-option",
+          "unknown-question": "ignored"
+        }
+      })
+      .expect(200);
+
+    expect(progressResponse.body).toMatchObject({
+      userId: "user-1",
+      contentId: "progress-content",
+      status: "in_progress",
+      progressPercent: 50,
+      answeredQuestionIds: ["progress-q1"],
+      answers: { "progress-q1": "selected-option" }
+    });
+    expect(JSON.stringify(progressResponse.body)).not.toContain("unknown-question");
+
+    const listResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content/progress")
+      .set("authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(listResponse.body.progress).toEqual(expect.arrayContaining([
+      expect.objectContaining({ contentId: "progress-content", progressPercent: 50 })
+    ]));
+
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/scores")
+      .set("authorization", `Bearer ${token}`)
+      .send({ contentId: "progress-content", score: 10, maxScore: 10, progressPercent: 100 })
+      .expect(201);
+
+    const submitted = await db.collection("test_pactContentProgress").findOne({ userId: "user-1", contentId: "progress-content" });
+    expect(submitted).toMatchObject({
+      status: "submitted",
+      score: 10,
+      maxScore: 10,
+      progressPercent: 100
+    });
+  });
+
   it("lets admins and instructors gate content availability", async () => {
     const db = await getMongoDb(config);
     await db.collection("test_pactContent").updateOne(

@@ -83,6 +83,27 @@ export type PactScore = {
   updatedAt: string;
 };
 
+export type PactAnswerValue = string | string[] | Record<string, string> | boolean;
+
+export type PactContentProgress = {
+  id: string;
+  courseId: string;
+  cohortId: string;
+  squadId?: string;
+  userId: string;
+  contentId: string;
+  contentType: ContentType;
+  answers: Record<string, PactAnswerValue>;
+  answeredQuestionIds: string[];
+  progressPercent: number;
+  score?: number;
+  maxScore?: number;
+  status: "not_started" | "in_progress" | "submitted";
+  submittedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PactAuditEvent = {
   id: string;
   action: "squad.assignment.changed";

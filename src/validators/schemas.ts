@@ -54,3 +54,16 @@ export const scoreSubmitSchema = z.object({
   progressPercent: z.number().min(0).max(100).default(100),
   agsAccessToken: z.string().optional()
 });
+
+const answerValueSchema = z.union([
+  z.string().max(4000),
+  z.array(z.string().max(200)).max(100),
+  z.record(z.string().max(200), z.string().max(4000)),
+  z.boolean()
+]);
+
+export const contentProgressUpdateSchema = z.object({
+  answers: z.record(z.string().min(1).max(200), answerValueSchema).optional(),
+  progressPercent: z.number().min(0).max(100).optional(),
+  status: z.enum(["not_started", "in_progress", "submitted"]).optional()
+});

@@ -8,7 +8,7 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 import type { ContentType } from "../domain/types.js";
 
@@ -47,6 +47,26 @@ export function createApiRouter(config: AppConfig) {
   router.get("/content", async (req, res, next) => {
     try {
       res.status(200).json(await pactService(config).then((service) => service.getContent(requireSession(req))));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/content/progress", async (req, res, next) => {
+    try {
+      res.status(200).json({ progress: await pactService(config).then((service) => service.getContentProgress(requireSession(req))) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch("/content/:contentId/progress", async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.updateContentProgress(
+        requireSession(req),
+        req.params.contentId,
+        contentProgressUpdateSchema.parse(req.body)
+      )));
     } catch (error) {
       next(error);
     }

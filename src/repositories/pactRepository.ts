@@ -2,7 +2,7 @@ import type { Db } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 import { collectionName } from "../db/mongo.js";
 import { AppError } from "../errors/AppError.js";
-import type { ContentStatus, ContentType, PactAuditEvent, PactContent, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
+import type { ContentStatus, ContentType, PactAnswerValue, PactAuditEvent, PactContent, PactContentProgress, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
 
 export class PactRepository {
   constructor(private readonly db: Db, private readonly config: AppConfig) {}
@@ -374,6 +374,105 @@ export class PactRepository {
     return score;
   }
 
+  async listProgressForUser(user: PactUser, contentIds: string[]) {
+    if (!contentIds.length) return [];
+    return this.contentProgress()
+      .find({ userId: user.id, courseId: user.courseId, cohortId: user.cohortId, contentId: { $in: contentIds } })
+      .sort({ updatedAt: -1 })
+      .toArray();
+  }
+
+  async upsertContentProgress(input: {
+    user: PactUser;
+    content: PactContent;
+    answers?: Record<string, PactAnswerValue>;
+    progressPercent?: number;
+    status?: PactContentProgress["status"];
+    score?: number;
+    maxScore?: number;
+  }) {
+    const now = new Date().toISOString();
+    const existing = await this.contentProgress().findOne({ userId: input.user.id, contentId: input.content.id });
+    const answers = input.answers ?? existing?.answers ?? {};
+    const answeredQuestionIds = Object.keys(answers).filter((questionId) => answers[questionId] !== undefined);
+    const progressPercent = input.progressPercent ?? deriveProgressPercent(answeredQuestionIds.length, input.content);
+    const status = input.status ?? (progressPercent > 0 ? "in_progress" : "not_started");
+    const progress: PactContentProgress = {
+      id: existing?.id ?? crypto.randomUUID(),
+      courseId: input.user.courseId,
+      cohortId: input.user.cohortId,
+      squadId: input.user.squadId,
+      userId: input.user.id,
+      contentId: input.content.id,
+      contentType: input.content.type,
+      answers,
+      answeredQuestionIds,
+      progressPercent,
+      score: input.score ?? existing?.score,
+      maxScore: input.maxScore ?? existing?.maxScore,
+      status,
+      submittedAt: status === "submitted" ? (existing?.submittedAt ?? now) : existing?.submittedAt,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    };
+    await this.contentProgress().updateOne({ userId: input.user.id, contentId: input.content.id }, { $set: progress }, { upsert: true });
+    return progress;
+  }
+
+  async cohortProgressAnalytics(session: { role: PactRole; courseId: string; cohortId: string }, cohortId = session.cohortId) {
+    const users = await this.users()
+      .find({ courseId: session.courseId, cohortId, role: "learner" })
+      .project<Pick<PactUser, "id" | "name" | "email" | "squadId">>({ _id: 0, id: 1, name: 1, email: 1, squadId: 1 })
+      .sort({ name: 1, email: 1, id: 1 })
+      .toArray();
+    const [progressRecords, content, squads] = await Promise.all([
+      this.contentProgress().find({ courseId: session.courseId, cohortId }).toArray(),
+      this.content().find({ courseId: session.courseId, $or: globalOrCohortFilter(cohortId) }).toArray(),
+      this.squads().find({ courseId: session.courseId, cohortId }).toArray()
+    ]);
+    const progressByUser = groupBy(progressRecords, (item) => item.userId);
+    const contentById = new Map(content.map((item) => [item.id, item]));
+    const totalAssignedContent = content.length;
+    const learnerSummaries = users.map((user) => {
+      const records = progressByUser.get(user.id) ?? [];
+      const submittedCount = records.filter((item) => item.status === "submitted").length;
+      const averageProgressPercent = records.length
+        ? Math.round(records.reduce((total, item) => total + item.progressPercent, 0) / records.length)
+        : 0;
+      const totalScore = records.reduce((total, item) => total + (item.score ?? 0), 0);
+      const maxScore = records.reduce((total, item) => total + (item.maxScore ?? contentById.get(item.contentId)?.maxScore ?? 0), 0);
+
+      return {
+        userId: user.id,
+        name: user.name,
+        email: user.email,
+        squadId: user.squadId,
+        squadNumber: squadNumberForUser(user, squads),
+        startedCount: records.length,
+        submittedCount,
+        assignedCount: totalAssignedContent,
+        averageProgressPercent,
+        totalScore,
+        maxScore
+      };
+    });
+    const submittedCount = progressRecords.filter((item) => item.status === "submitted").length;
+    const averageProgressPercent = progressRecords.length
+      ? Math.round(progressRecords.reduce((total, item) => total + item.progressPercent, 0) / progressRecords.length)
+      : 0;
+
+    return {
+      courseId: session.courseId,
+      cohortId,
+      learnerCount: users.length,
+      assignedContentCount: totalAssignedContent,
+      startedContentCount: progressRecords.length,
+      submittedContentCount: submittedCount,
+      averageProgressPercent,
+      learners: learnerSummaries
+    };
+  }
+
   async scoreboard(courseId: string, cohortId: string, squadId?: string) {
     const match: Record<string, string> = { courseId, cohortId };
     if (squadId) match.squadId = squadId;
@@ -415,9 +514,18 @@ export class PactRepository {
     return this.db.collection<PactScore>(collectionName(this.config, "pactScores"));
   }
 
+  private contentProgress() {
+    return this.db.collection<PactContentProgress>(collectionName(this.config, "pactContentProgress"));
+  }
+
   private auditEvents() {
     return this.db.collection<PactAuditEvent>(collectionName(this.config, "pactAuditEvents"));
   }
+}
+
+function deriveProgressPercent(answeredCount: number, content: PactContent) {
+  const questionCount = content.questionCount ?? content.questions?.length ?? 0;
+  return questionCount ? Math.min(100, Math.round((answeredCount / questionCount) * 100)) : 0;
 }
 
 function globalOrCohortFilter(cohortId: string) {
