@@ -8,8 +8,9 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { contentCreateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
+import type { ContentType } from "../domain/types.js";
 
 export function createApiRouter(config: AppConfig) {
   const router = Router();
@@ -84,7 +85,7 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
-  router.get("/admin/cohorts", requirePactRole("admin"), async (req, res, next) => {
+  router.get("/admin/cohorts", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);
       res.status(200).json({ cohorts: await repository.listAdminCohorts(requireSession(req)) });
@@ -102,7 +103,7 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
-  router.patch("/admin/users/:userId/squad", requirePactRole("admin"), async (req, res, next) => {
+  router.patch("/admin/users/:userId/squad", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);
       const input = squadAssignmentSchema.parse(req.body);
@@ -119,7 +120,7 @@ export function createApiRouter(config: AppConfig) {
   router.post("/admin/content", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);
-      res.status(201).json(await repository.upsertContent(contentCreateSchema.parse(req.body)));
+      res.status(201).json(await repository.upsertContentForManagement(contentCreateSchema.parse(req.body), requireSession(req)));
     } catch (error) {
       next(error);
     }
@@ -142,12 +143,47 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/admin/diagnostics/content-counts", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json({ counts: await repository.listContentCountsForDiagnostics(requireSession(req)) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.patch("/admin/content/:contentId/status", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);
       res.status(200).json(await repository.updateContentStatus({
         contentId: req.params.contentId,
         status: contentStatusUpdateSchema.parse(req.body).status,
+        session: requireSession(req)
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch("/admin/content/:contentId/assignment", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json(await repository.updateContentAssignment({
+        contentId: req.params.contentId,
+        cohortId: contentAssignmentUpdateSchema.parse(req.body).cohortId,
+        session: requireSession(req)
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch("/admin/content/:contentId/lms-label", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json(await repository.updateContentLmsLabel({
+        contentId: req.params.contentId,
+        lmsLabel: contentLmsLabelUpdateSchema.parse(req.body).lmsLabel,
         session: requireSession(req)
       }));
     } catch (error) {
@@ -162,7 +198,10 @@ export function ltiLaunchHandler(config: AppConfig) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
       const repository = await pactRepository(config);
-      const response = await new LtiLaunchService(config, repository).handleLaunch(ltiLaunchSchema.parse(req.body).id_token);
+      const response = await new LtiLaunchService(config, repository).handleLaunch(
+        ltiLaunchSchema.parse(req.body).id_token,
+        parseLaunchContentType(req.params.contentType)
+      );
       if (acceptsHtml(req)) {
         const target = new URL(config.pactWebBaseUrl);
         target.hash = `sessionToken=${encodeURIComponent(response.sessionToken)}`;
@@ -174,6 +213,14 @@ export function ltiLaunchHandler(config: AppConfig) {
       next(error);
     }
   };
+}
+
+function parseLaunchContentType(value: string | undefined): ContentType {
+  if (value === "module" || value === "challenge" || value === "game" || value === "assessment") {
+    return value;
+  }
+
+  throw new AppError(400, "INVALID_CONTENT_TYPE", "LTI launch content type is not supported");
 }
 
 function acceptsHtml(req: { headers: { accept?: string | string[] } }) {

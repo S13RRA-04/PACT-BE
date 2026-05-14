@@ -1,5 +1,5 @@
 import { jwtVerify, SignJWT } from "jose";
-import type { PactRole } from "../domain/types.js";
+import type { ContentType, PactRole } from "../domain/types.js";
 import { AppError } from "../errors/AppError.js";
 
 export type PactSession = {
@@ -8,6 +8,7 @@ export type PactSession = {
   courseId: string;
   cohortId: string;
   squadId?: string;
+  contentType?: ContentType;
 };
 
 export class SessionService {
@@ -35,7 +36,12 @@ export class SessionService {
       role: payload.role as PactRole,
       courseId: String(payload.courseId),
       cohortId: String(payload.cohortId),
-      squadId: payload.squadId ? String(payload.squadId) : undefined
+      squadId: payload.squadId ? String(payload.squadId) : undefined,
+      contentType: isContentType(payload.contentType) ? payload.contentType : undefined
     };
   }
+}
+
+function isContentType(value: unknown): value is ContentType {
+  return value === "module" || value === "challenge" || value === "game" || value === "assessment";
 }

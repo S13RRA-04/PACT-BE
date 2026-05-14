@@ -5,7 +5,7 @@ import {
   type JWTPayload
 } from "jose";
 import type { AppConfig } from "../config/config.js";
-import type { PactRole } from "../domain/types.js";
+import type { ContentType, PactRole } from "../domain/types.js";
 import { AppError } from "../errors/AppError.js";
 import { PactRepository } from "../repositories/pactRepository.js";
 import { SessionService } from "../auth/sessionService.js";
@@ -44,7 +44,7 @@ export class LtiLaunchService {
     this.sessions = new SessionService(config.pactSessionSecret);
   }
 
-  async handleLaunch(idToken: string) {
+  async handleLaunch(idToken: string, contentType?: ContentType) {
     const payload = await this.verifyPlatformLaunch(idToken);
 
     if (payload["https://purl.imsglobal.org/spec/lti/claim/message_type"] !== "LtiResourceLinkRequest") {
@@ -71,8 +71,7 @@ export class LtiLaunchService {
       name: payload.name ?? ([payload.given_name, payload.family_name].filter(Boolean).join(" ") || undefined),
       role: normalizeRole(payload["https://purl.imsglobal.org/spec/lti/claim/roles"] ?? []),
       courseId,
-      cohortId,
-      squadId: custom.squad_id
+      cohortId
     });
 
     const sessionToken = await this.sessions.sign({
@@ -80,7 +79,8 @@ export class LtiLaunchService {
       role: user.role,
       courseId: user.courseId,
       cohortId: user.cohortId,
-      squadId: user.squadId
+      squadId: user.squadId,
+      contentType
     });
 
     return {

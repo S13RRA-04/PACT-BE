@@ -33,6 +33,7 @@ export type PactContent = {
   role: PactRole | "all";
   type: ContentType;
   title: string;
+  lmsLabel?: string;
   prompt: string;
   maxScore: number;
   lineItemUrl?: string;

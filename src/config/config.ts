@@ -56,13 +56,15 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
   const mongoCollectionPrefix = parsed.MONGO_COLLECTION_PREFIX === "__empty__"
     ? ""
     : parsed.MONGO_COLLECTION_PREFIX ?? (parsed.NODE_ENV === "production" ? "" : "pact_dev_");
+  const mongoDbName = parsed.MONGODB_DB ?? parsed.MONGO_DB_NAME ?? "PACT_V4";
+  assertPactMongoDatabaseName(mongoDbName);
 
   return {
     env: parsed.NODE_ENV,
     port: parsed.PORT,
     appBaseUrl: parsed.APP_BASE_URL.replace(/\/$/, ""),
     mongoUri,
-    mongoDbName: parsed.MONGODB_DB ?? parsed.MONGO_DB_NAME ?? "PACT_V4",
+    mongoDbName,
     mongoCollectionPrefix,
     lmsApiBaseUrl: parsed.LMS_API_BASE_URL.replace(/\/$/, ""),
     lmsPlatformIssuer: parsed.LMS_PLATFORM_ISSUER.replace(/\/$/, ""),
@@ -110,4 +112,18 @@ function isLoopbackMongoUri(mongoUri: string) {
   } catch {
     return false;
   }
+}
+
+function assertPactMongoDatabaseName(databaseName: string) {
+  const normalized = normalizeDatabaseName(databaseName);
+  if (!normalized.includes("pact")) {
+    throw new Error("PACT MONGO_DB_NAME must be PACT-specific and must not point at the LMS or Keycloak database.");
+  }
+  if (normalized.includes("keycloak") || normalized === "lms" || normalized === "cetu") {
+    throw new Error("PACT MONGO_DB_NAME must not point at the LMS or Keycloak database.");
+  }
+}
+
+function normalizeDatabaseName(databaseName: string) {
+  return databaseName.toLowerCase().replace(/[^a-z0-9]/g, "");
 }

@@ -28,11 +28,13 @@ export class DeepLinkingService {
       throw new AppError(400, "INVALID_DEEP_LINK_RETURN_URL", "Deep Linking return URL is not trusted");
     }
 
+    const context = parseDeepLinkData(launch.deepLinkingSettings.data);
+    const labels = await this.repository.listLmsLabelsForDeepLink(context.courseId);
     const contentItems = [
-      contentItem("pact-module-hub", "PACT Modules", `${this.config.appBaseUrl}/launch/module`, 100, "module"),
-      contentItem("pact-challenge-hub", "PACT Squad Challenges", `${this.config.appBaseUrl}/launch/challenge`, 100, "challenge"),
-      contentItem("pact-game-hub", "PACT Games", `${this.config.appBaseUrl}/launch/game`, 100, "game"),
-      contentItem("pact-assessment-hub", "PACT Assessments", `${this.config.appBaseUrl}/launch/assessment`, 100, "assessment")
+      contentItem("pact-module-hub", labels.module ?? "PACT Modules", `${this.config.appBaseUrl}/launch/module`, 100, "module"),
+      contentItem("pact-challenge-hub", labels.challenge ?? "PACT Challenges", `${this.config.appBaseUrl}/launch/challenge`, 100, "challenge"),
+      contentItem("pact-game-hub", labels.game ?? "PACT Games", `${this.config.appBaseUrl}/launch/game`, 100, "game"),
+      contentItem("pact-assessment-hub", labels.assessment ?? "PACT Assessments", `${this.config.appBaseUrl}/launch/assessment`, 100, "assessment")
     ];
 
     const privateKey = this.config.pactToolPrivateKeyPem;
@@ -56,6 +58,19 @@ export class DeepLinkingService {
       .sign(await importPKCS8(privateKey, "RS256"));
 
     return { returnUrl, jwt };
+  }
+}
+
+function parseDeepLinkData(value: unknown) {
+  if (typeof value !== "string") {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value) as { courseId?: unknown };
+    return { courseId: typeof parsed.courseId === "string" ? parsed.courseId : undefined };
+  } catch {
+    return {};
   }
 }
 

@@ -13,6 +13,7 @@ export class PactRepository {
     const user: PactUser = {
       id: existing?.id ?? crypto.randomUUID(),
       ...input,
+      squadId: input.squadId ?? existing?.squadId,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };
@@ -43,13 +44,15 @@ export class PactRepository {
     return squad;
   }
 
-  async listAdminCohorts(session: { role: PactRole; courseId: string }) {
+  async listAdminCohorts(session: { role: PactRole; courseId: string; cohortId: string }) {
+    const filter: Record<string, string> = { courseId: session.courseId };
+
     const users = await this.users()
-      .find({ courseId: session.courseId })
+      .find(filter)
       .sort({ cohortId: 1, role: 1, name: 1, email: 1 })
       .toArray();
     const squads = await this.squads()
-      .find({ courseId: session.courseId })
+      .find(filter)
       .sort({ cohortId: 1, number: 1, name: 1 })
       .toArray();
     const cohortIds = Array.from(new Set([...users.map((user) => user.cohortId), ...squads.map((squad) => squad.cohortId)])).sort();
@@ -119,7 +122,7 @@ export class PactRepository {
     return { ...user, squadId, updatedAt: new Date().toISOString() };
   }
 
-  async assignSquadForAdmin(userId: string, input: { squadId?: string; squadNumber?: SquadNumber; session: { userId: string; courseId: string } }) {
+  async assignSquadForAdmin(userId: string, input: { squadId?: string; squadNumber?: SquadNumber; session: { userId: string; role: PactRole; courseId: string; cohortId: string } }) {
     const user = await this.requireUser(userId);
     if (user.courseId !== input.session.courseId) {
       throw new AppError(403, "USER_FORBIDDEN", "User is not assigned to this course");
@@ -188,7 +191,15 @@ export class PactRepository {
     return content;
   }
 
-  async listContentFor(user: PactUser) {
+  async upsertContentForManagement(input: Omit<PactContent, "id" | "createdAt" | "updatedAt"> & { id?: string }, session: { role: PactRole; courseId: string; cohortId: string }) {
+    if (input.courseId !== session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this course");
+    }
+
+    return this.upsertContent(input);
+  }
+
+  async listContentFor(user: PactUser, contentType?: ContentType) {
     if (user.role === "admin") {
       return this.content()
         .find({ courseId: user.courseId })
@@ -198,17 +209,16 @@ export class PactRepository {
 
     if (user.role === "instructor") {
       return this.content()
-        .find({
-          courseId: user.courseId,
-          $or: globalOrCohortFilter(user.cohortId)
-        })
+        .find({ courseId: user.courseId })
         .sort({ type: 1, title: 1 })
         .toArray();
     }
 
+    const typeFilter = contentType ? { type: contentType } : {};
     return this.content()
       .find({
         courseId: user.courseId,
+        ...typeFilter,
         status: "published",
         role: { $in: [user.role, "all"] },
         $or: globalOrCohortFilter(user.cohortId)
@@ -219,14 +229,77 @@ export class PactRepository {
 
   async listContentForManagement(session: { role: PactRole; courseId: string; cohortId: string }) {
     const filter: Record<string, unknown> = { courseId: session.courseId };
-    if (session.role === "instructor") {
-      filter.$or = globalOrCohortFilter(session.cohortId);
-    }
 
     return this.content()
       .find(filter)
       .sort({ type: 1, title: 1 })
       .toArray();
+  }
+
+  async listLmsLabelsForDeepLink(courseId?: string) {
+    const filter: Record<string, unknown> = { lmsLabel: { $exists: true, $type: "string" } };
+    if (courseId) {
+      filter.courseId = courseId;
+    }
+
+    const content = await this.content()
+      .find(filter)
+      .sort({ updatedAt: -1, title: 1 })
+      .toArray();
+    const labels: Partial<Record<ContentType, string>> = {};
+    for (const item of content) {
+      if (!labels[item.type] && item.lmsLabel) {
+        labels[item.type] = item.lmsLabel;
+      }
+    }
+    return labels;
+  }
+
+  async listContentCountsForDiagnostics(session: { role: PactRole; courseId: string; cohortId: string }) {
+    const match: Record<string, unknown> = { courseId: session.courseId };
+
+    return this.content().aggregate<{
+      courseId: string;
+      cohortId: string | null;
+      type: ContentType;
+      status: ContentStatus;
+      count: number;
+      questions: number;
+    }>([
+      { $match: match },
+      {
+        $group: {
+          _id: {
+            courseId: "$courseId",
+            cohortId: { $ifNull: ["$cohortId", null] },
+            type: "$type",
+            status: "$status"
+          },
+          count: { $sum: 1 },
+          questions: { $sum: { $ifNull: ["$questionCount", { $size: { $ifNull: ["$questions", []] } }] } }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          courseId: "$_id.courseId",
+          cohortId: "$_id.cohortId",
+          type: "$_id.type",
+          status: "$_id.status",
+          count: 1,
+          questions: 1
+        }
+      },
+      { $sort: { courseId: 1, cohortId: 1, type: 1, status: 1 } }
+    ]).toArray();
+  }
+
+  async countPublishedModulesForCourse(courseId: string) {
+    return this.content().countDocuments({
+      courseId,
+      type: "module",
+      status: "published"
+    });
   }
 
   async requireContent(contentId: string) {
@@ -240,13 +313,35 @@ export class PactRepository {
     if (content.courseId !== input.session.courseId) {
       throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this course");
     }
-    if (input.session.role === "instructor" && content.cohortId && content.cohortId !== input.session.cohortId) {
-      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this cohort");
-    }
 
     const updatedAt = new Date().toISOString();
     await this.content().updateOne({ id: input.contentId }, { $set: { status: input.status, updatedAt } });
     return { ...content, status: input.status, updatedAt };
+  }
+
+  async updateContentAssignment(input: { contentId: string; cohortId: string | null; session: { role: PactRole; courseId: string; cohortId: string } }) {
+    const content = await this.requireContent(input.contentId);
+    if (content.courseId !== input.session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this course");
+    }
+
+    const updatedAt = new Date().toISOString();
+    await this.content().updateOne({ id: input.contentId }, { $set: { cohortId: input.cohortId, updatedAt } });
+    return { ...content, cohortId: input.cohortId, updatedAt };
+  }
+
+  async updateContentLmsLabel(input: { contentId: string; lmsLabel: string | null; session: { role: PactRole; courseId: string; cohortId: string } }) {
+    const content = await this.requireContent(input.contentId);
+    if (content.courseId !== input.session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this course");
+    }
+
+    const updatedAt = new Date().toISOString();
+    const update = input.lmsLabel
+      ? { $set: { lmsLabel: input.lmsLabel, updatedAt } }
+      : { $unset: { lmsLabel: 1 as const }, $set: { updatedAt } };
+    await this.content().updateOne({ id: input.contentId }, update);
+    return input.lmsLabel ? { ...content, lmsLabel: input.lmsLabel, updatedAt } : { ...content, lmsLabel: undefined, updatedAt };
   }
 
   async upsertScore(input: {

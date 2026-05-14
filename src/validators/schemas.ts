@@ -28,6 +28,7 @@ export const contentCreateSchema = z.object({
   role: z.enum(["admin", "instructor", "learner", "all"]).default("all"),
   type: z.enum(["module", "challenge", "game", "assessment"]),
   title: z.string().min(1).max(200),
+  lmsLabel: z.string().min(1).max(200).optional(),
   prompt: z.string().min(1).max(4000),
   maxScore: z.number().nonnegative(),
   lineItemUrl: z.string().url().optional(),
@@ -36,6 +37,14 @@ export const contentCreateSchema = z.object({
 
 export const contentStatusUpdateSchema = z.object({
   status: z.enum(["draft", "published", "archived"])
+});
+
+export const contentAssignmentUpdateSchema = z.object({
+  cohortId: z.string().min(1).nullable()
+});
+
+export const contentLmsLabelUpdateSchema = z.object({
+  lmsLabel: z.string().min(1).max(200).nullable()
 });
 
 export const scoreSubmitSchema = z.object({

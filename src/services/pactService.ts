@@ -8,7 +8,7 @@ export class PactService {
 
   async getContent(session: PactSession) {
     const user = await this.repository.requireUser(session.userId);
-    return this.repository.listContentFor(user);
+    return this.repository.listContentFor(user, session.contentType);
   }
 
   async getSession(session: PactSession) {
@@ -20,19 +20,31 @@ export class PactService {
       courseId: user.courseId,
       cohortId: user.cohortId,
       squadId: user.squadId,
-      squadNumber: squad?.number ?? squad?.name.match(/^Squad ([1-4])$/)?.[1]
+      squadNumber: squad?.number ?? squad?.name.match(/^Squad ([1-4])$/)?.[1],
+      contentType: session.contentType
     };
   }
 
   async getSessionDiagnostic(session: PactSession) {
     const user = await this.repository.requireUser(session.userId);
     const visibleContent = await this.repository.listContentFor(user);
+    const [contentCounts, publishedModuleCount] = await Promise.all([
+      this.repository.listContentCountsForDiagnostics(session),
+      this.repository.countPublishedModulesForCourse(session.courseId)
+    ]);
+    const hasPublishedModules = publishedModuleCount > 0;
 
     return {
       courseId: session.courseId,
       cohortId: session.cohortId,
       role: session.role,
-      visibleContentCount: visibleContent.length
+      contentType: session.contentType,
+      visibleContentCount: visibleContent.length,
+      contentCounts,
+      publishedModuleWarning: hasPublishedModules ? undefined : {
+        code: "NO_PUBLISHED_MODULES",
+        message: `No published modules exist for course ${session.courseId}. Learner module launches will not show module content until modules are imported and published.`
+      }
     };
   }
 
@@ -74,6 +86,7 @@ export class PactService {
   }
 
   async getScoreboard(session: PactSession) {
-    return this.repository.scoreboard(session.courseId, session.cohortId, session.squadId);
+    const user = await this.repository.requireUser(session.userId);
+    return this.repository.scoreboard(user.courseId, user.cohortId, user.squadId);
   }
 }
