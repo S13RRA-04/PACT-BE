@@ -8,6 +8,7 @@ export type AgsScoreRequest = {
   maxScore: number;
   activityProgress: "Initialized" | "Started" | "InProgress" | "Completed";
   gradingProgress: "FullyGraded" | "Pending" | "PendingManual";
+  comment?: string;
 };
 
 export class LmsAgsClient {
@@ -32,6 +33,7 @@ export class LmsAgsClient {
         scoreMaximum: request.maxScore,
         activityProgress: request.activityProgress,
         gradingProgress: request.gradingProgress,
+        ...(request.comment ? { comment: request.comment } : {}),
         timestamp: new Date().toISOString()
       })
     });

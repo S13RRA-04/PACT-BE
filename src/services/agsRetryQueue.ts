@@ -14,6 +14,7 @@ export type AgsRetryJob = {
   maxScore: number;
   progressPercent: number;
   accessToken: string;
+  comment?: string;
   retryCount: number;
 };
 
@@ -43,7 +44,8 @@ async function runRetry(job: AgsRetryJob) {
       score: job.score,
       maxScore: job.maxScore,
       activityProgress: job.progressPercent >= 100 ? "Completed" : "InProgress",
-      gradingProgress: "FullyGraded"
+      gradingProgress: "FullyGraded",
+      comment: job.comment
     });
     await job.repository.recordAgsPublishAttempt({
       courseId: job.user.courseId,

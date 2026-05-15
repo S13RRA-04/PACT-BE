@@ -109,6 +109,96 @@ describe("PACT API", () => {
     expect(response.body.map((item: { id: string }) => item.id)).toEqual(["content-1", "content-global"]);
   });
 
+  it("requires instructor unlock before learners can see or access published content", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactUsers").updateOne(
+      { id: "locked-learner" },
+      {
+        $set: {
+          id: "locked-learner",
+          lmsUserId: "lms-locked-learner",
+          role: "learner",
+          courseId: "pact-lock",
+          cohortId: "cohort-lock",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      },
+      { upsert: true }
+    );
+    await db.collection("test_pactUsers").updateOne(
+      { id: "lock-instructor" },
+      {
+        $set: {
+          id: "lock-instructor",
+          lmsUserId: "lms-lock-instructor",
+          role: "instructor",
+          courseId: "pact-lock",
+          cohortId: "cohort-lock",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      },
+      { upsert: true }
+    );
+    const lockedDefaultContent = { ...publishedContent("locked-default-content", "cohort-lock", "learner", "published", "module"), courseId: "pact-lock" };
+    delete (lockedDefaultContent as { locked?: boolean }).locked;
+    await db.collection("test_pactContent").insertMany([
+      lockedDefaultContent,
+      { ...publishedContent("locked-explicit-content", "cohort-lock", "learner", "published", "challenge", true), courseId: "pact-lock" },
+      { ...publishedContent("unlocked-content", "cohort-lock", "learner", "published", "assessment", false), courseId: "pact-lock" }
+    ]);
+
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "locked-learner",
+      role: "learner",
+      courseId: "pact-lock",
+      cohortId: "cohort-lock"
+    });
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "lock-instructor",
+      role: "instructor",
+      courseId: "pact-lock",
+      cohortId: "cohort-lock"
+    });
+
+    const initialResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .expect(200);
+    expect(initialResponse.body.map((item: { id: string }) => item.id)).toEqual(["unlocked-content"]);
+
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/locked-explicit-content/progress")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .send({ progressPercent: 25 })
+      .expect(403)
+      .expect((response) => {
+        expect(response.body.error).toMatchObject({ code: "CONTENT_LOCKED" });
+      });
+
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/admin/content/locked-explicit-content/lock")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .send({ locked: false })
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toMatchObject({ id: "locked-explicit-content", locked: false });
+      });
+
+    const unlockedResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .expect(200);
+    expect(unlockedResponse.body.map((item: { id: string }) => item.id).sort()).toEqual(["locked-explicit-content", "unlocked-content"]);
+
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/locked-explicit-content/progress")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .send({ progressPercent: 25 })
+      .expect(200);
+  });
+
   it("scopes learner content to the launched content type", async () => {
     const db = await getMongoDb(config);
     await db.collection("test_pactUsers").updateOne(
@@ -867,6 +957,101 @@ describe("PACT API", () => {
       });
       expect(fetchMock).not.toHaveBeenCalled();
       expect(await db.collection("test_pactAgsPublishAttempts").findOne({ contentId: "partial-score-content" })).toBeNull();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("packages assessment session timing with the LMS AGS score", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactContent").updateOne(
+      { id: "timed-assessment-content" },
+      {
+        $set: {
+          ...publishedContent("timed-assessment-content", "cohort-a", "learner", "published", "assessment"),
+          lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/timed-assessment",
+          mechanics: {
+            kind: "readiness_checklist",
+            title: "Timed assessment",
+            prompt: "Start and submit timing is included in the LMS score package.",
+            resultLabel: "Readiness",
+            timing: {
+              enabled: true,
+              timeLimitSeconds: 600,
+              startTrigger: "learner_start",
+              submitTrigger: "content_submit"
+            },
+            checks: [{ id: "ready", label: "Ready" }]
+          }
+        }
+      },
+      { upsert: true }
+    );
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "user-1",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-a",
+      squadId: "squad-1"
+    });
+    const startedAt = new Date(Date.now() - 120_000).toISOString();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+
+    try {
+      const progressResponse = await request(createApp(config, createLogger(config)))
+        .patch("/api/v1/content/timed-assessment-content/progress")
+        .set("authorization", `Bearer ${token}`)
+        .send({
+          mechanicsState: {
+            kind: "readiness_checklist",
+            checkedIds: ["ready"],
+            startedAt,
+            timing: {
+              startTrigger: "learner_start",
+              submitTrigger: "content_submit",
+              timeLimitSeconds: 600
+            }
+          },
+          progressPercent: 100,
+          status: "in_progress"
+        })
+        .expect(200);
+
+      expect(progressResponse.body).toMatchObject({
+        contentId: "timed-assessment-content",
+        status: "in_progress",
+        startedAt
+      });
+
+      await request(createApp(config, createLogger(config)))
+        .post("/api/v1/scores")
+        .set("authorization", `Bearer ${token}`)
+        .send({ contentId: "timed-assessment-content", score: 10, maxScore: 10, progressPercent: 100, agsAccessToken: "timing-token" })
+        .expect(201);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://lms.example.test/api/v1/lti/ags/lineitems/timed-assessment/scores",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({ Authorization: "Bearer timing-token" })
+        })
+      );
+      const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+      const timingPackage = JSON.parse(body.comment).pactAssessmentTiming;
+      expect(timingPackage).toMatchObject({
+        contentId: "timed-assessment-content",
+        contentType: "assessment",
+        startTrigger: "learner_start",
+        submitTrigger: "content_submit",
+        startedAt,
+        timeLimitSeconds: 600,
+        expired: false
+      });
+      expect(timingPackage.submittedAt).toEqual(expect.any(String));
+      expect(timingPackage.elapsedSeconds).toBeGreaterThanOrEqual(100);
+
+      const submitted = await db.collection("test_pactContentProgress").findOne({ userId: "user-1", contentId: "timed-assessment-content" });
+      expect(submitted).toMatchObject({ startedAt, status: "submitted", submittedAt: expect.any(String) });
     } finally {
       fetchMock.mockRestore();
     }
@@ -2730,6 +2915,44 @@ describe("PACT API", () => {
     expect(session.contentType).toBeUndefined();
   });
 
+  it("scopes direct deep-linked assessment launches to the selected content", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactContent").updateOne(
+      { id: "assessment-pretest" },
+      { $set: publishedContent("assessment-pretest", "cohort-launch", "learner", "published", "assessment") },
+      { upsert: true }
+    );
+    await db.collection("test_pactContent").updateOne(
+      { id: "assessment-posttest" },
+      { $set: publishedContent("assessment-posttest", "cohort-launch", "learner", "published", "assessment") },
+      { upsert: true }
+    );
+    const idToken = await signResourceLaunch({
+      targetLinkUri: "http://localhost:4100/launch/assessment?contentId=assessment-pretest",
+      custom: { content_id: "assessment-pretest" }
+    });
+
+    const launchResponse = await request(createApp(config, createLogger(config)))
+      .post("/api/v1/lti/launch")
+      .set("accept", "application/json")
+      .type("form")
+      .send({ id_token: idToken })
+      .expect(200);
+
+    const sessionToken = sessionTokenFromSetCookie(launchResponse.headers["set-cookie"]);
+    const session = await new SessionService(config.pactSessionSecret).verify(sessionToken);
+    expect(session).toMatchObject({
+      contentType: "assessment",
+      contentId: "assessment-pretest"
+    });
+
+    const contentResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content")
+      .set("authorization", `Bearer ${sessionToken}`)
+      .expect(200);
+    expect(contentResponse.body.map((item: { id: string }) => item.id)).toEqual(["assessment-pretest"]);
+  });
+
   it("rejects resource launches that are missing required LTI claims before creating a session", async () => {
     const missingVersion = await signResourceLaunch({ omitVersion: true });
     const missingContext = await signResourceLaunch({ omitContext: true });
@@ -2879,6 +3102,16 @@ describe("PACT API", () => {
       },
       { upsert: true }
     );
+    await db.collection("test_pactContent").updateOne(
+      { id: "assessment-pretest" },
+      {
+        $set: {
+          ...publishedContent("assessment-pretest", null, "learner", "published", "assessment"),
+          lmsLabel: "PACT Pre-test"
+        }
+      },
+      { upsert: true }
+    );
     const idToken = await signDeepLinkLaunch();
 
     const response = await request(createApp(config, createLogger(config)))
@@ -2897,7 +3130,6 @@ describe("PACT API", () => {
     expect(deepLinkPayload["https://purl.imsglobal.org/spec/lti-dl/claim/content_items"]).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          title: "PACT Assessments",
           url: "http://localhost:4100/launch/assessment",
           lineItem: expect.objectContaining({ resourceId: "pact-assessment-hub", tag: "assessment" })
         }),
@@ -2905,6 +3137,12 @@ describe("PACT API", () => {
           title: "PACT Team Challenge Launch",
           url: "http://localhost:4100/launch/challenge",
           lineItem: expect.objectContaining({ label: "PACT Team Challenge Launch", resourceId: "pact-challenge-hub", tag: "challenge" })
+        }),
+        expect.objectContaining({
+          title: "PACT Pre-test",
+          url: "http://localhost:4100/launch/assessment?contentId=assessment-pretest",
+          custom: { content_id: "assessment-pretest" },
+          lineItem: expect.objectContaining({ label: "PACT Pre-test", resourceId: "assessment-pretest", tag: "assessment" })
         })
       ])
     );
@@ -3058,7 +3296,7 @@ async function signAdminLaunchWithAgs() {
     .sign(platformPrivateKey);
 }
 
-function publishedContent(id: string, cohortId: string | null, role: "learner" | "admin", status = "published", type = "module") {
+function publishedContent(id: string, cohortId: string | null, role: "learner" | "admin", status = "published", type = "module", locked = false) {
   const now = new Date().toISOString();
   return {
     id,
@@ -3070,6 +3308,7 @@ function publishedContent(id: string, cohortId: string | null, role: "learner" |
     prompt: "Answer the prompt",
     maxScore: 10,
     status,
+    locked,
     createdAt: now,
     updatedAt: now
   };

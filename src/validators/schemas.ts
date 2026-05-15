@@ -54,6 +54,12 @@ const assessmentMechanicsSchema = z.object({
   title: z.string().min(1).max(160),
   prompt: z.string().min(1).max(1200),
   resultLabel: z.string().min(1).max(80).optional(),
+  timing: z.object({
+    enabled: z.boolean().default(true),
+    timeLimitSeconds: z.number().int().positive().max(86400).optional(),
+    startTrigger: z.literal("learner_start").default("learner_start"),
+    submitTrigger: z.literal("content_submit").default("content_submit")
+  }).optional(),
   checks: z.array(z.object({
     id: z.string().min(1).max(80),
     label: z.string().min(1).max(160),
@@ -79,7 +85,8 @@ export const contentCreateSchema = z.object({
   maxScore: z.number().nonnegative(),
   lineItemUrl: z.string().url().optional(),
   mechanics: contentMechanicsSchema.optional(),
-  status: z.enum(["draft", "published", "archived"]).default("draft")
+  status: z.enum(["draft", "published", "archived"]).default("draft"),
+  locked: z.boolean().default(true)
 }).superRefine((content, ctx) => {
   if (!content.mechanics) return;
   const mechanics = content.mechanics;
@@ -123,6 +130,10 @@ function expectedMechanicsKind(type: "module" | "challenge" | "game" | "assessme
 
 export const contentStatusUpdateSchema = z.object({
   status: z.enum(["draft", "published", "archived"])
+});
+
+export const contentLockUpdateSchema = z.object({
+  locked: z.boolean()
 });
 
 export const contentAssignmentUpdateSchema = z.object({

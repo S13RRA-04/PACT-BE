@@ -68,6 +68,7 @@ export class LtiLaunchService {
     if (!sub) throw new AppError(401, "INVALID_LTI_SUBJECT", "LTI launch is missing subject");
 
     const custom = payload["https://purl.imsglobal.org/spec/lti/claim/custom"] ?? {};
+    const targetLaunch = launchScopeFromTargetLink(payload["https://purl.imsglobal.org/spec/lti/claim/target_link_uri"]);
     const context = payload["https://purl.imsglobal.org/spec/lti/claim/context"];
     const courseId = custom.course_id ?? context?.label ?? "pact";
     const cohortId = custom.cohort_id ?? context?.id;
@@ -99,7 +100,8 @@ export class LtiLaunchService {
       courseId: user.courseId,
       cohortId: user.cohortId,
       squadId: user.squadId,
-      contentType,
+      contentType: contentType ?? targetLaunch.contentType,
+      contentId: custom.content_id ?? targetLaunch.contentId,
       csrfToken: crypto.randomUUID()
     });
 
@@ -197,6 +199,20 @@ export class LtiLaunchService {
       || /^\/launch\/(module|challenge|game|assessment)$/.test(target.pathname)
       || target.pathname === "/api/v1/lti/launch"
       || (this.config.pactAllowLegacyLtiPaths && target.pathname === "/lti/launch");
+  }
+}
+
+function launchScopeFromTargetLink(value: string | undefined): { contentType?: ContentType; contentId?: string } {
+  if (!value) return {};
+  try {
+    const target = new URL(value);
+    const contentType = target.pathname.match(/^\/launch\/(module|challenge|game|assessment)$/)?.[1] as ContentType | undefined;
+    return {
+      contentType,
+      contentId: target.searchParams.get("contentId") ?? undefined
+    };
+  } catch {
+    return {};
   }
 }
 

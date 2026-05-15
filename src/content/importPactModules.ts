@@ -59,7 +59,7 @@ try {
     console.log(`Imported ${result.content.title}: ${result.content.questionCount} questions.`);
   }
 
-  console.log(`PACT module import complete: ${importedModules} modules, ${importedQuestions} questions, ${skippedQuestions} duplicate questions skipped.`);
+  console.log(`PACT content import complete: ${importedModules} content items, ${importedQuestions} questions, ${skippedQuestions} duplicate questions skipped.`);
 } finally {
   await closeMongoClient();
 }

@@ -30,11 +30,21 @@ export class DeepLinkingService {
 
     const context = parseDeepLinkData(launch.deepLinkingSettings.data);
     const labels = await this.repository.listLmsLabelsForDeepLink(context.courseId);
+    const directAssessmentItems = (await this.repository.listDeepLinkableContent(context.courseId))
+      .map((content) => contentItem(
+        content.id,
+        content.lmsLabel ?? content.title,
+        `${this.config.appBaseUrl}/launch/${content.type}?contentId=${encodeURIComponent(content.id)}`,
+        content.maxScore,
+        content.type,
+        { content_id: content.id }
+      ));
     const contentItems = [
       contentItem("pact-module-hub", labels.module ?? "PACT Modules", `${this.config.appBaseUrl}/launch/module`, 100, "module"),
       contentItem("pact-challenge-hub", labels.challenge ?? "PACT Challenges", `${this.config.appBaseUrl}/launch/challenge`, 100, "challenge"),
       contentItem("pact-game-hub", labels.game ?? "PACT Games", `${this.config.appBaseUrl}/launch/game`, 100, "game"),
-      contentItem("pact-assessment-hub", labels.assessment ?? "PACT Assessments", `${this.config.appBaseUrl}/launch/assessment`, 100, "assessment")
+      contentItem("pact-assessment-hub", labels.assessment ?? "PACT Assessments", `${this.config.appBaseUrl}/launch/assessment`, 100, "assessment"),
+      ...directAssessmentItems
     ];
 
     const privateKey = this.config.pactToolPrivateKeyPem;
@@ -74,11 +84,12 @@ function parseDeepLinkData(value: unknown) {
   }
 }
 
-function contentItem(resourceId: string, title: string, url: string, scoreMaximum: number, tag: string) {
+function contentItem(resourceId: string, title: string, url: string, scoreMaximum: number, tag: string, custom?: Record<string, string>) {
   return {
     type: "ltiResourceLink",
     title,
     url,
+    ...(custom ? { custom } : {}),
     lineItem: {
       label: title,
       scoreMaximum,

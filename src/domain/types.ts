@@ -42,6 +42,7 @@ export type PactContent = {
   questions?: PactQuestion[];
   mechanics?: ContentMechanics;
   status: ContentStatus;
+  locked?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -116,11 +117,19 @@ export type AssessmentMechanics = {
   title: string;
   prompt: string;
   resultLabel?: string;
+  timing?: AssessmentTimingConfig;
   checks: Array<{
     id: string;
     label: string;
     initiallyChecked?: boolean;
   }>;
+};
+
+export type AssessmentTimingConfig = {
+  enabled: boolean;
+  timeLimitSeconds?: number;
+  startTrigger: "learner_start";
+  submitTrigger: "content_submit";
 };
 
 export type ContentMechanics = ChallengeMechanics | GameMechanics | AssessmentMechanics;
@@ -152,6 +161,7 @@ export type PactAgsPublishAttempt = {
   score: number;
   maxScore: number;
   progressPercent: number;
+  comment?: string;
   status: "pending" | "published" | "failed" | "retry_exhausted" | "not_applicable" | "skipped_duplicate";
   retryCount?: number;
   nextRetryAt?: string;
@@ -207,6 +217,7 @@ export type PactContentProgress = {
   maxScore?: number;
   status: "not_started" | "in_progress" | "submitted";
   submittedAt?: string;
+  startedAt?: string;
   createdAt: string;
   updatedAt: string;
 };

@@ -6,7 +6,7 @@ import { assertQuestionAttemptAllowed, evaluateAssignmentCompletion, isManualQue
 import { scheduleAgsRetry } from "./agsRetryQueue.js";
 import type { PactSession } from "../auth/sessionService.js";
 import type { AppConfig } from "../config/config.js";
-import type { PactAgsPublishAttempt, PactAnswerValue, PactContent, PactMechanicsState, PactQuestion, PactUser } from "../domain/types.js";
+import type { PactAgsPublishAttempt, PactAnswerValue, PactContent, PactContentProgress, PactMechanicsState, PactQuestion, PactUser } from "../domain/types.js";
 
 export class PactService {
   constructor(
@@ -18,12 +18,12 @@ export class PactService {
 
   async getContent(session: PactSession) {
     const user = await this.repository.requireUser(session.userId);
-    return this.repository.listContentFor(user, session.contentType);
+    return this.repository.listContentFor(user, session.contentType, session.contentId);
   }
 
   async getContentProgress(session: PactSession) {
     const user = await this.repository.requireUser(session.userId);
-    const content = await this.repository.listContentFor(user, session.contentType);
+    const content = await this.repository.listContentFor(user, session.contentType, session.contentId);
     return this.repository.listProgressForUser(user, content.map((item) => item.id));
   }
 
@@ -60,6 +60,7 @@ export class PactService {
       squadId: user.squadId,
       squadNumber: squad?.number ?? squad?.name.match(/^Squad ([1-4])$/)?.[1],
       contentType: session.contentType,
+      contentId: session.contentId,
       csrfToken: session.csrfToken
     };
   }
@@ -259,7 +260,12 @@ export class PactService {
 
     const maxScore = input.maxScore ?? content.maxScore;
     const assignmentComplete = input.progressPercent >= 100;
-    const existingScore = await this.repository.getScoreForUserContent(user.id, content.id);
+    const [existingScore, existingProgress] = await Promise.all([
+      this.repository.getScoreForUserContent(user.id, content.id),
+      this.repository.listProgressForUser(user, [content.id]).then((items) => items[0])
+    ]);
+    const submittedAt = new Date().toISOString();
+    const comment = buildAssessmentTimingComment(content, existingProgress, submittedAt);
     const scoreAlreadyPublished = assignmentComplete && isSamePublishedScore(existingScore, {
       score: input.score,
       maxScore,
@@ -269,7 +275,7 @@ export class PactService {
       ? "not_ready"
       : scoreAlreadyPublished && existingScore
         ? await this.recordSkippedDuplicateAgsAttempt(user, content, input, maxScore)
-        : await this.publishScoreToAgs(user, content, input, maxScore);
+        : await this.publishScoreToAgs(user, content, { ...input, comment }, maxScore);
 
     const score = await this.repository.upsertScore({
       user,
@@ -285,6 +291,7 @@ export class PactService {
       content,
       progressPercent: input.progressPercent,
       status: assignmentComplete ? "submitted" : "in_progress",
+      submittedAt: assignmentComplete ? submittedAt : undefined,
       score: input.score,
       maxScore
     });
@@ -374,12 +381,16 @@ export class PactService {
     if (user.role === "learner" && content.status !== "published") {
       throw new AppError(403, "CONTENT_NOT_AVAILABLE", "Content is not available");
     }
+
+    if (user.role === "learner" && content.locked !== false) {
+      throw new AppError(403, "CONTENT_LOCKED", "Content is locked by the instructor");
+    }
   }
 
   private async publishScoreToAgs(
     user: PactUser,
     content: PactContent,
-    input: { score: number; progressPercent: number; agsAccessToken?: string },
+    input: { score: number; progressPercent: number; agsAccessToken?: string; comment?: string },
     maxScore: number,
     retryCount = 0
   ) {
@@ -404,6 +415,7 @@ export class PactService {
           maxScore,
           progressPercent: input.progressPercent,
           accessToken: input.agsAccessToken,
+          comment: input.comment,
           retryCount: nextRetryCount
         });
       }
@@ -470,7 +482,7 @@ export class PactService {
   private async enqueueFinalAgsPublish(
     user: PactUser,
     content: PactContent,
-    input: { score: number; progressPercent: number },
+    input: { score: number; progressPercent: number; comment?: string },
     maxScore: number
   ) {
     if (!content.lineItemUrl) {
@@ -505,7 +517,8 @@ export class PactService {
       const agsStatus = await this.sendScoreToAgs(user, content, {
         score: attempt.score,
         progressPercent: attempt.progressPercent,
-        agsAccessToken
+        agsAccessToken,
+        comment: attempt.comment
       }, attempt.maxScore);
       await this.repository.updateAgsPublishAttemptOutcome({
         id: attempt.id,
@@ -551,7 +564,7 @@ export class PactService {
   private async sendScoreToAgs(
     user: PactUser,
     content: PactContent,
-    input: { score: number; progressPercent: number; agsAccessToken?: string },
+    input: { score: number; progressPercent: number; agsAccessToken?: string; comment?: string },
     maxScore: number
   ) {
     const accessToken = content.lineItemUrl
@@ -564,7 +577,8 @@ export class PactService {
       score: input.score,
       maxScore,
       activityProgress: input.progressPercent >= 100 ? "Completed" : "InProgress",
-      gradingProgress: "FullyGraded"
+      gradingProgress: "FullyGraded",
+      comment: input.comment
     });
   }
 
@@ -609,7 +623,7 @@ export class PactService {
   private async recordSkippedDuplicateAgsAttempt(
     user: PactUser,
     content: PactContent,
-    input: { score: number; progressPercent: number },
+    input: { score: number; progressPercent: number; comment?: string },
     maxScore: number
   ) {
     await this.recordAgsAttempt(user, content, input, maxScore, "skipped_duplicate");
@@ -619,7 +633,7 @@ export class PactService {
   private async recordAgsAttempt(
     user: PactUser,
     content: PactContent,
-    input: { score: number; progressPercent: number },
+    input: { score: number; progressPercent: number; comment?: string },
     maxScore: number,
     status: "pending" | "published" | "failed" | "retry_exhausted" | "not_applicable" | "skipped_duplicate",
     error?: unknown,
@@ -636,6 +650,7 @@ export class PactService {
       score: input.score,
       maxScore,
       progressPercent: input.progressPercent,
+      comment: input.comment,
       status,
       retryCount,
       nextRetryAt,
@@ -733,6 +748,40 @@ function isSamePublishedScore(
     && existing.score === next.score
     && existing.maxScore === next.maxScore
     && existing.progressPercent === next.progressPercent;
+}
+
+function buildAssessmentTimingComment(content: PactContent, progress: PactContentProgress | undefined, submittedAt: string) {
+  if (content.type !== "assessment" || content.mechanics?.kind !== "readiness_checklist") return undefined;
+  if (content.mechanics.timing?.enabled === false) return undefined;
+
+  const startedAt = assessmentStartedAt(progress);
+  const elapsedSeconds = startedAt ? Math.max(0, Math.round((Date.parse(submittedAt) - Date.parse(startedAt)) / 1000)) : undefined;
+  const timeLimitSeconds = content.mechanics.timing?.timeLimitSeconds;
+  const payload = {
+    pactAssessmentTiming: {
+      contentId: content.id,
+      contentType: content.type,
+      startTrigger: content.mechanics.timing?.startTrigger ?? "learner_start",
+      submitTrigger: content.mechanics.timing?.submitTrigger ?? "content_submit",
+      startedAt,
+      submittedAt,
+      elapsedSeconds,
+      timeLimitSeconds,
+      expired: typeof elapsedSeconds === "number" && typeof timeLimitSeconds === "number" ? elapsedSeconds > timeLimitSeconds : undefined
+    }
+  };
+  return JSON.stringify(payload);
+}
+
+function assessmentStartedAt(progress: PactContentProgress | undefined) {
+  const mechanicsStartedAt = progress?.mechanicsState?.startedAt;
+  if (typeof mechanicsStartedAt === "string" && Number.isFinite(Date.parse(mechanicsStartedAt))) {
+    return mechanicsStartedAt;
+  }
+  if (progress?.startedAt && Number.isFinite(Date.parse(progress.startedAt))) {
+    return progress.startedAt;
+  }
+  return undefined;
 }
 
 const AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score";

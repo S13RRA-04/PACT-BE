@@ -220,17 +220,18 @@ export class PactRepository {
     return this.upsertContent(input);
   }
 
-  async listContentFor(user: PactUser, contentType?: ContentType) {
+  async listContentFor(user: PactUser, contentType?: ContentType, contentId?: string) {
+    const idFilter = contentId ? { id: contentId } : {};
     if (user.role === "admin") {
       return this.content()
-        .find({ courseId: user.courseId })
+        .find({ courseId: user.courseId, ...idFilter })
         .sort({ type: 1, title: 1 })
         .toArray();
     }
 
     if (user.role === "instructor") {
       return this.content()
-        .find({ courseId: user.courseId })
+        .find({ courseId: user.courseId, ...idFilter })
         .sort({ type: 1, title: 1 })
         .toArray();
     }
@@ -239,10 +240,24 @@ export class PactRepository {
     return this.content()
       .find({
         courseId: user.courseId,
+        ...idFilter,
         ...typeFilter,
         status: "published",
+        locked: false,
         role: { $in: [user.role, "all"] },
         $or: globalOrCohortFilter(user.cohortId)
+      })
+      .sort({ type: 1, title: 1 })
+      .toArray();
+  }
+
+  async listDeepLinkableContent(courseId?: string) {
+    return this.content()
+      .find({
+        ...(courseId ? { courseId } : {}),
+        status: "published",
+        locked: false,
+        type: { $in: ["assessment"] }
       })
       .sort({ type: 1, title: 1 })
       .toArray();
@@ -319,7 +334,8 @@ export class PactRepository {
     return this.content().countDocuments({
       courseId,
       type: "module",
-      status: "published"
+      status: "published",
+      locked: false
     });
   }
 
@@ -338,6 +354,17 @@ export class PactRepository {
     const updatedAt = new Date().toISOString();
     await this.content().updateOne({ id: input.contentId }, { $set: { status: input.status, updatedAt } });
     return { ...content, status: input.status, updatedAt };
+  }
+
+  async updateContentLock(input: { contentId: string; locked: boolean; session: { role: PactRole; courseId: string; cohortId: string } }) {
+    const content = await this.requireContent(input.contentId);
+    if (content.courseId !== input.session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this course");
+    }
+
+    const updatedAt = new Date().toISOString();
+    await this.content().updateOne({ id: input.contentId }, { $set: { locked: input.locked, updatedAt } });
+    return { ...content, locked: input.locked, updatedAt };
   }
 
   async updateContentAssignment(input: { contentId: string; cohortId: string | null; session: { role: PactRole; courseId: string; cohortId: string } }) {
@@ -686,6 +713,8 @@ export class PactRepository {
     mechanicsState?: PactMechanicsState;
     progressPercent?: number;
     status?: PactContentProgress["status"];
+    startedAt?: string;
+    submittedAt?: string;
     score?: number;
     maxScore?: number;
   }) {
@@ -711,7 +740,8 @@ export class PactRepository {
       score: input.score ?? existing?.score,
       maxScore: input.maxScore ?? existing?.maxScore,
       status,
-      submittedAt: status === "submitted" ? (existing?.submittedAt ?? now) : existing?.submittedAt,
+      startedAt: existing?.startedAt ?? input.startedAt ?? startedAtFromMechanicsState(mechanicsState),
+      submittedAt: status === "submitted" ? (existing?.submittedAt ?? input.submittedAt ?? now) : existing?.submittedAt,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };
@@ -1064,6 +1094,13 @@ function withoutCursor(filter: Record<string, unknown>) {
 function deriveProgressPercent(answeredCount: number, content: PactContent) {
   const questionCount = content.questionCount ?? content.questions?.length ?? 0;
   return questionCount ? Math.min(100, Math.round((answeredCount / questionCount) * 100)) : 0;
+}
+
+function startedAtFromMechanicsState(mechanicsState: PactMechanicsState | undefined) {
+  if (!mechanicsState) return undefined;
+  const startedAt = mechanicsState.startedAt;
+  if (typeof startedAt !== "string") return undefined;
+  return Number.isFinite(Date.parse(startedAt)) ? startedAt : undefined;
 }
 
 function mechanicsMatchesContentType(type: ContentType, kind: ContentMechanics["kind"]) {
