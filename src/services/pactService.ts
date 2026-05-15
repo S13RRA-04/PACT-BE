@@ -6,7 +6,7 @@ import { assertQuestionAttemptAllowed, evaluateAssignmentCompletion, isManualQue
 import { scheduleAgsRetry } from "./agsRetryQueue.js";
 import type { PactSession } from "../auth/sessionService.js";
 import type { AppConfig } from "../config/config.js";
-import type { PactAgsPublishAttempt, PactAnswerValue, PactContent, PactQuestion, PactUser } from "../domain/types.js";
+import type { PactAgsPublishAttempt, PactAnswerValue, PactContent, PactMechanicsState, PactQuestion, PactUser } from "../domain/types.js";
 
 export class PactService {
   constructor(
@@ -293,6 +293,7 @@ export class PactService {
 
   async updateContentProgress(session: PactSession, contentId: string, input: {
     answers?: Record<string, PactAnswerValue>;
+    mechanicsState?: PactMechanicsState;
     progressPercent?: number;
     status?: "not_started" | "in_progress" | "submitted";
   }) {
@@ -304,6 +305,7 @@ export class PactService {
       user,
       content,
       answers,
+      mechanicsState: input.mechanicsState,
       progressPercent: input.progressPercent,
       status: input.status
     });
@@ -653,7 +655,7 @@ function filterAnswersForContent(content: PactContent, answers: Record<string, P
   return Object.fromEntries(Object.entries(answers).filter(([questionId]) => questionIds.has(questionId)));
 }
 
-function scoreQuestion(question: PactQuestion, value: PactAnswerValue) {
+export function scoreQuestion(question: PactQuestion, value: PactAnswerValue) {
   const payload = question.payload;
   const points = question.scoring.points;
   if (payload.kind === "true_false") return value === payload.correct ? points : 0;
@@ -674,7 +676,9 @@ function scoreQuestion(question: PactQuestion, value: PactAnswerValue) {
   if (payload.kind === "drag_match" && isRecord(value)) {
     const matches = Array.isArray(payload.matches) ? payload.matches : [];
     const correct = matches.filter((match) => isQuestionMatch(match) && value[match.sourceId] === match.targetId).length;
-    return matches.length ? Math.round((correct / matches.length) * points) : 0;
+    if (!matches.length) return 0;
+    if (payload.partialCredit === false) return correct === matches.length ? points : 0;
+    return Math.round((correct / matches.length) * points);
   }
   return 0;
 }

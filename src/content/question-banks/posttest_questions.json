@@ -1,0 +1,1149 @@
+{
+  "$comment": "Post-test — Form B. Forty questions, parallel to Pre-test Form A — same topics, same difficulty bands, different specific content. Must-pass flags ON for content where wrong answers in the field translate to operational error. Coverage matches pre-test: Day 1 L1 (5), Day 1 L2 (7), Day 2 L1 (6), Day 2 L2 (4), Day 3 L1 (6), Day 4 L1 (5), Day 4 L2 (4), cumulative (3). Designed for longitudinal-learning measurement when paired with pretest_questions.json.",
+  "questions": [
+    {
+      "id": "q_post01iabsell",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_1",
+      "role": "both",
+      "topic": "threat_landscape",
+      "tags": ["post_test", "fundamentals"],
+      "stem": {
+        "en": "An Initial Access Broker (IAB) primarily monetizes their compromise activity by:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_sell",   "text": { "en": "Selling access to compromised networks to other criminal actors" } },
+          { "id": "opt_ransom", "text": { "en": "Deploying ransomware against compromised victims directly" } },
+          { "id": "opt_dox",    "text": { "en": "Publishing victim data on leak sites for reputational damage" } },
+          { "id": "opt_state",  "text": { "en": "Conducting espionage on behalf of a nation-state" } }
+        ],
+        "correct": ["opt_sell"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 2, "difficulty": "foundational", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post02statealign",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "day_1",
+      "role": "both",
+      "topic": "threat_landscape",
+      "tags": ["post_test", "criminal_state"],
+      "stem": {
+        "en": "An intrusion conducted by a state-aligned actor against a U.S. company is not a federal crime if the actor was operating under direction of a foreign government."
+      },
+      "payload": { "kind": "true_false", "correct": false },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post03attinit",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_1",
+      "role": "both",
+      "topic": "attack_framework",
+      "tags": ["post_test", "mitre"],
+      "stem": {
+        "en": "An adversary delivers a spearphishing email with a weaponized attachment to a finance employee, who opens it. This action is best categorized in the MITRE ATT&CK framework as:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_init",   "text": { "en": "Initial Access" } },
+          { "id": "opt_pers",   "text": { "en": "Persistence" } },
+          { "id": "opt_priv",   "text": { "en": "Privilege Escalation" } },
+          { "id": "opt_def",    "text": { "en": "Defense Evasion" } }
+        ],
+        "correct": ["opt_init"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 2, "difficulty": "foundational", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post04motivelt",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_1",
+      "role": "both",
+      "topic": "threat_landscape",
+      "tags": ["post_test", "motive"],
+      "stem": {
+        "en": "Which of the following actor categories is MOST likely to maintain long-term covert access without immediate monetization?"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_espion", "text": { "en": "State-aligned espionage actor" } },
+          { "id": "opt_ransom", "text": { "en": "Ransomware affiliate" } },
+          { "id": "opt_bec",    "text": { "en": "BEC operator" } },
+          { "id": "opt_iab",    "text": { "en": "Initial Access Broker" } }
+        ],
+        "correct": ["opt_espion"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 2, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post05classhold",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_1",
+      "role": "both",
+      "topic": "threat_landscape",
+      "tags": ["post_test", "classification"],
+      "stem": {
+        "en": "During a cohort discussion that includes foreign partners, a U.S. agent begins to describe a specific intelligence-derived attribution detail not in the public domain. The instructor's correct response is to:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_redir",  "text": { "en": "Redirect the discussion to publicly available information and note that the topic is not appropriate for this setting" } },
+          { "id": "opt_let",    "text": { "en": "Allow the discussion to continue and address it later" } },
+          { "id": "opt_excuse", "text": { "en": "Excuse the foreign partners from the room temporarily" } },
+          { "id": "opt_endsep", "text": { "en": "End the session and reschedule a U.S.-only continuation" } }
+        ],
+        "correct": ["opt_redir"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "advanced", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post06scaprocess",
+      "version": 1,
+      "supersedes": null,
+      "type": "drag_match",
+      "day": "day_1",
+      "role": "agent",
+      "topic": "legal_authorities_domestic",
+      "tags": ["post_test", "sca"],
+      "stem": {
+        "en": "Match each evidentiary need to the lowest-tier legal process that suffices under the SCA."
+      },
+      "payload": {
+        "kind": "drag_match",
+        "sources": [
+          { "id": "src_subscriber", "text": { "en": "Identify the account holder for an email address" } },
+          { "id": "src_logins",     "text": { "en": "Obtain login IP addresses and connection times for an account" } },
+          { "id": "src_email",      "text": { "en": "Obtain the contents of stored email messages" } },
+          { "id": "src_realtime",   "text": { "en": "Capture the contents of communications in real time" } }
+        ],
+        "targets": [
+          { "id": "tgt_sub",   "text": { "en": "Subpoena" } },
+          { "id": "tgt_2703d", "text": { "en": "2703(d) order" } },
+          { "id": "tgt_warr",  "text": { "en": "Search warrant" } },
+          { "id": "tgt_wire",  "text": { "en": "Title III wiretap order" } }
+        ],
+        "matches": [
+          { "sourceId": "src_subscriber", "targetId": "tgt_sub" },
+          { "sourceId": "src_logins",     "targetId": "tgt_2703d" },
+          { "sourceId": "src_email",      "targetId": "tgt_warr" },
+          { "sourceId": "src_realtime",   "targetId": "tgt_wire" }
+        ],
+        "partialCredit": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 5, "difficulty": "core", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post07curtilage",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_1",
+      "role": "agent",
+      "topic": "legal_authorities_domestic",
+      "tags": ["post_test", "scope"],
+      "stem": {
+        "en": "A warrant authorizes the search of '123 Main Street, including the residence and any outbuildings on the curtilage.' During execution, agents notice an unsecured laptop on the front passenger seat of a parked vehicle in the driveway. The correct posture is:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_no",      "text": { "en": "The vehicle is not necessarily within the warrant's scope; agents should not seize without a separate basis" } },
+          { "id": "opt_yes",     "text": { "en": "Agents may seize because the vehicle is on the curtilage" } },
+          { "id": "opt_pc",      "text": { "en": "Agents may seize on probable cause alone, without further process" } },
+          { "id": "opt_consent", "text": { "en": "Agents may seize after obtaining the resident's consent" } }
+        ],
+        "correct": ["opt_no"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "advanced", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post08preserve",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_1",
+      "role": "agent",
+      "topic": "legal_authorities_domestic",
+      "tags": ["post_test", "preservation"],
+      "stem": {
+        "en": "An agent identifies that records relevant to her investigation are held by a U.S. provider but the formal process to compel disclosure will take days to obtain. The most appropriate immediate action is to:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_letter", "text": { "en": "Issue a 2703(f) preservation letter to the provider" } },
+          { "id": "opt_call",   "text": { "en": "Call the provider's compliance team to request informal hold" } },
+          { "id": "opt_warr",   "text": { "en": "Wait until the warrant is signed before taking any action" } },
+          { "id": "opt_emerg",  "text": { "en": "Invoke the emergency-disclosure provisions of ECPA" } }
+        ],
+        "correct": ["opt_letter"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post09network247",
+      "version": 1,
+      "supersedes": null,
+      "type": "fill_blank",
+      "day": "day_1",
+      "role": "both",
+      "topic": "legal_authorities_international",
+      "tags": ["post_test", "budapest"],
+      "stem": {
+        "en": "The Budapest Convention's mechanism for 24-hour-a-day, 7-day-a-week point-of-contact availability for urgent international cooperation is known as the ____."
+      },
+      "payload": {
+        "kind": "fill_blank",
+        "blanks": [
+          { "id": "blank_network", "label": { "en": "Network name (full or short form)" }, "accepted": ["24/7 Network", "24/7 network", "24-7 Network", "Article 35 Network", "G7 24/7 Network"], "caseSensitive": false }
+        ]
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 2, "difficulty": "foundational", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post10mlatslow",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "day_1",
+      "role": "both",
+      "topic": "legal_authorities_international",
+      "tags": ["post_test", "mlat_timing"],
+      "stem": {
+        "en": "MLAT requests typically resolve in days to a few weeks for cooperative jurisdictions."
+      },
+      "payload": { "kind": "true_false", "correct": false },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post11consent",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "day_1",
+      "role": "agent",
+      "topic": "legal_authorities_domestic",
+      "tags": ["post_test", "consent"],
+      "stem": {
+        "en": "When a victim company consents to the FBI accessing its own systems and data for investigative purposes, that consent generally eliminates the need for a separate warrant or 2703(d) order to access those systems."
+      },
+      "payload": { "kind": "true_false", "correct": true },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post12emergency",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_1",
+      "role": "agent",
+      "topic": "legal_authorities_domestic",
+      "tags": ["post_test", "emergency"],
+      "stem": {
+        "en": "Under ECPA's emergency-disclosure provisions, a U.S. provider MAY voluntarily disclose content to law enforcement when:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_emerg",    "text": { "en": "The provider in good faith believes there is an emergency involving danger of death or serious physical injury" } },
+          { "id": "opt_request",  "text": { "en": "Law enforcement requests the disclosure in writing" } },
+          { "id": "opt_court",    "text": { "en": "A magistrate has issued a placeholder order pending warrant" } },
+          { "id": "opt_internal", "text": { "en": "The provider's internal policy authorizes the disclosure" } }
+        ],
+        "correct": ["opt_emerg"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "advanced", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post13sourcematch",
+      "version": 1,
+      "supersedes": null,
+      "type": "drag_match",
+      "day": "day_2",
+      "role": "both",
+      "topic": "evidence_acquisition",
+      "tags": ["post_test", "sources"],
+      "stem": {
+        "en": "Match each investigative question to the evidence source MOST likely to answer it."
+      },
+      "payload": {
+        "kind": "drag_match",
+        "sources": [
+          { "id": "src_psinit",   "text": { "en": "Which user account first authenticated to the breached server?" } },
+          { "id": "src_lateral",  "text": { "en": "What internal hosts did the actor pivot to from the initial foothold?" } },
+          { "id": "src_signin",   "text": { "en": "What public IP address was used to log in to the corporate cloud tenant?" } },
+          { "id": "src_attribut", "text": { "en": "What handle on a public forum has the suspected actor used historically?" } }
+        ],
+        "targets": [
+          { "id": "tgt_host",    "text": { "en": "Host artifacts (event logs, registry)" } },
+          { "id": "tgt_network", "text": { "en": "Network artifacts (NetFlow, internal DNS)" } },
+          { "id": "tgt_cloud",   "text": { "en": "Cloud / identity-provider logs" } },
+          { "id": "tgt_osint",   "text": { "en": "OSINT" } }
+        ],
+        "matches": [
+          { "sourceId": "src_psinit",   "targetId": "tgt_host" },
+          { "sourceId": "src_lateral",  "targetId": "tgt_network" },
+          { "sourceId": "src_signin",   "targetId": "tgt_cloud" },
+          { "sourceId": "src_attribut", "targetId": "tgt_osint" }
+        ],
+        "partialCredit": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post14first24",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_2",
+      "role": "both",
+      "topic": "evidence_acquisition",
+      "tags": ["post_test", "first_24h"],
+      "stem": {
+        "en": "Within the 'first 24 hours' framework taught in this course, which action is MOST time-sensitive?"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_pres",   "text": { "en": "Send preservation requests to relevant providers" } },
+          { "id": "opt_brief",  "text": { "en": "Brief office leadership on the case" } },
+          { "id": "opt_attr",   "text": { "en": "Begin attribution analysis" } },
+          { "id": "opt_charge", "text": { "en": "Draft initial charging language" } }
+        ],
+        "correct": ["opt_pres"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post15rehash",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_2",
+      "role": "both",
+      "topic": "chain_of_custody",
+      "tags": ["post_test", "verification"],
+      "stem": {
+        "en": "An examiner re-hashes a forensic image at the start of analysis and finds the new hash does NOT match the hash recorded at acquisition. The correct response is to:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_stop",     "text": { "en": "Stop analysis, document the discrepancy, and investigate the integrity failure" } },
+          { "id": "opt_continue", "text": { "en": "Continue analysis and note the discrepancy in the report" } },
+          { "id": "opt_reimage",  "text": { "en": "Re-image the source and replace the corrupted image" } },
+          { "id": "opt_ignore",   "text": { "en": "Disregard the original hash if it was likely a transcription error" } }
+        ],
+        "correct": ["opt_stop"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "advanced", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post16cloud",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "day_2",
+      "role": "both",
+      "topic": "evidence_acquisition",
+      "tags": ["post_test", "cloud"],
+      "stem": {
+        "en": "When investigating a compromise of a victim company's cloud tenant, the victim itself can frequently provide an export of relevant tenant logs through customer-administrator tooling without requiring legal process directed at the cloud provider."
+      },
+      "payload": { "kind": "true_false", "correct": true },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post17witness",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_2",
+      "role": "agent",
+      "topic": "evidence_acquisition",
+      "tags": ["post_test", "scene"],
+      "stem": {
+        "en": "A witness is on scene during an evidence-acquisition operation and offers spontaneous information about what the system administrator was doing immediately before the breach was discovered. The agent's BEST immediate action is to:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_triage", "text": { "en": "Conduct a brief, documented triage interaction to capture volatile knowledge before it fades" } },
+          { "id": "opt_ignore", "text": { "en": "Defer all witness interaction to a later formal interview" } },
+          { "id": "opt_full",   "text": { "en": "Conduct a full structured interview at the scene" } },
+          { "id": "opt_record", "text": { "en": "Audio-record the witness without their knowledge" } }
+        ],
+        "correct": ["opt_triage"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post18presmulti",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_2",
+      "role": "agent",
+      "topic": "evidence_acquisition",
+      "tags": ["post_test", "preservation_uses"],
+      "stem": {
+        "en": "Which of the following are appropriate uses of a 2703(f) preservation letter? (Select all that apply.)"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "multiple",
+        "options": [
+          { "id": "opt_email",    "text": { "en": "Direct a U.S. email provider to retain account contents pending a warrant" } },
+          { "id": "opt_iaas",     "text": { "en": "Direct a U.S. cloud provider to retain instance logs pending process" } },
+          { "id": "opt_compel",   "text": { "en": "Compel the provider to immediately disclose the preserved records" } },
+          { "id": "opt_disclose", "text": { "en": "Direct a U.S. social media provider to retain account records pending process" } }
+        ],
+        "correct": ["opt_email", "opt_iaas", "opt_disclose"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post19triadrole",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_2",
+      "role": "both",
+      "topic": "partner_coordination",
+      "tags": ["post_test", "triad"],
+      "stem": {
+        "en": "In the international case-team triad, when the foreign partner runs domestic process to obtain evidence in their jurisdiction, the U.S. team's role is BEST described as:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_observe",   "text": { "en": "Coordinate but not direct — the partner runs their own legal process under their own law" } },
+          { "id": "opt_supervise", "text": { "en": "Supervise the foreign partner's process to ensure U.S. legal standards are met" } },
+          { "id": "opt_takeover",  "text": { "en": "Take over the case once foreign evidence is obtained" } },
+          { "id": "opt_walk",      "text": { "en": "Step back entirely until the foreign process completes" } }
+        ],
+        "correct": ["opt_observe"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post20intchannels",
+      "version": 1,
+      "supersedes": null,
+      "type": "drag_match",
+      "day": "day_2",
+      "role": "both",
+      "topic": "legal_authorities_international",
+      "tags": ["post_test", "channels"],
+      "stem": {
+        "en": "Match each international cooperation goal to the channel BEST suited to achieve it."
+      },
+      "payload": {
+        "kind": "drag_match",
+        "sources": [
+          { "id": "src_pres",   "text": { "en": "Immediate preservation of volatile data abroad pending formal process" } },
+          { "id": "src_compel", "text": { "en": "Compelled production of evidence admissible in U.S. court" } },
+          { "id": "src_dev",    "text": { "en": "Coordinated investigative-development activity with the foreign partner's police" } },
+          { "id": "src_extra",  "text": { "en": "Surrender of a foreign-located subject for U.S. prosecution" } }
+        ],
+        "targets": [
+          { "id": "tgt_247",   "text": { "en": "Budapest 24/7 Network preservation request" } },
+          { "id": "tgt_mlat",  "text": { "en": "Formal MLAT request" } },
+          { "id": "tgt_p2p",   "text": { "en": "Police-to-police cooperation channel" } },
+          { "id": "tgt_extra", "text": { "en": "Extradition treaty / process" } }
+        ],
+        "matches": [
+          { "sourceId": "src_pres",   "targetId": "tgt_247" },
+          { "sourceId": "src_compel", "targetId": "tgt_mlat" },
+          { "sourceId": "src_dev",    "targetId": "tgt_p2p" },
+          { "sourceId": "src_extra",  "targetId": "tgt_extra" }
+        ],
+        "partialCredit": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 5, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post21nonbudapest",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "day_2",
+      "role": "both",
+      "topic": "legal_authorities_international",
+      "tags": ["post_test", "non_signatory"],
+      "stem": {
+        "en": "If a country is not a signatory to the Budapest Convention, no formal mechanism exists to request international cooperation in cyber cases."
+      },
+      "payload": { "kind": "true_false", "correct": false },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post22cloudact",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_2",
+      "role": "agent",
+      "topic": "legal_authorities_international",
+      "tags": ["post_test", "cloud_act"],
+      "stem": {
+        "en": "An FBI agent identifies that a major U.S. cloud provider has data in a foreign data center. To compel production of that data, the agent should:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_us",      "text": { "en": "Serve U.S. legal process on the U.S. provider; the location of the data center is generally not the controlling factor under U.S. law" } },
+          { "id": "opt_mlat",    "text": { "en": "Always file an MLAT request to the country where the data center is located" } },
+          { "id": "opt_warrant", "text": { "en": "Apply for a foreign warrant via the data center's host country" } },
+          { "id": "opt_no",      "text": { "en": "Decline to seek the data — it is foreign-located" } }
+        ],
+        "correct": ["opt_us"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "advanced", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post23livedead",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_3",
+      "role": "both",
+      "topic": "host_forensics",
+      "tags": ["post_test", "live_acq"],
+      "stem": {
+        "en": "Compared to dead acquisition (system powered off), the principal benefit of live acquisition is:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_vol",   "text": { "en": "Capture of volatile state — memory, decrypted secrets, active connections" } },
+          { "id": "opt_speed", "text": { "en": "Faster acquisition time" } },
+          { "id": "opt_clean", "text": { "en": "Cleaner forensic image with less risk of contamination" } },
+          { "id": "opt_legal", "text": { "en": "Stronger legal posture against suppression challenges" } }
+        ],
+        "correct": ["opt_vol"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post24scenecheck",
+      "version": 1,
+      "supersedes": null,
+      "type": "drag_match",
+      "day": "day_3",
+      "role": "both",
+      "topic": "evidence_acquisition",
+      "tags": ["post_test", "scene_checklist"],
+      "stem": {
+        "en": "Match each scene-checklist action to the correct execution-order phase. (The first three actions occur BEFORE any volatile evidence acquisition; the last two are LATE-phase actions.)"
+      },
+      "payload": {
+        "kind": "drag_match",
+        "sources": [
+          { "id": "src_auth",      "text": { "en": "Confirm scene security and authority" } },
+          { "id": "src_photo",     "text": { "en": "Establish photographic baseline" } },
+          { "id": "src_idvol",     "text": { "en": "Identify volatile evidence at risk" } },
+          { "id": "src_acqstable", "text": { "en": "Acquire stable evidence (disk imaging, documents)" } },
+          { "id": "src_squad",     "text": { "en": "Communicate to your squad with periodic check-ins" } }
+        ],
+        "targets": [
+          { "id": "tgt_step1", "text": { "en": "Step 1 — first action on scene" } },
+          { "id": "tgt_step2", "text": { "en": "Step 2 — before any movement of items" } },
+          { "id": "tgt_step3", "text": { "en": "Step 3 — before chain-of-custody opens" } },
+          { "id": "tgt_step7", "text": { "en": "Step 7 — after volatile evidence has been captured" } },
+          { "id": "tgt_step8", "text": { "en": "Step 8 — throughout the scene operation" } }
+        ],
+        "matches": [
+          { "sourceId": "src_auth",      "targetId": "tgt_step1" },
+          { "sourceId": "src_photo",     "targetId": "tgt_step2" },
+          { "sourceId": "src_idvol",     "targetId": "tgt_step3" },
+          { "sourceId": "src_acqstable", "targetId": "tgt_step7" },
+          { "sourceId": "src_squad",     "targetId": "tgt_step8" }
+        ],
+        "partialCredit": false
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 5, "difficulty": "core", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post25correlate",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_3",
+      "role": "both",
+      "topic": "timeline_construction",
+      "tags": ["post_test", "correlation"],
+      "stem": {
+        "en": "An analyst has built a timeline from host event logs alone. Which addition will MOST strengthen the resulting attribution narrative?"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_corr", "text": { "en": "Network artifacts correlated with host events at matching timestamps" } },
+          { "id": "opt_more", "text": { "en": "More host event log data from additional systems" } },
+          { "id": "opt_iter", "text": { "en": "A second pass over the same host data with a different forensic tool" } },
+          { "id": "opt_ai",   "text": { "en": "An AI-generated summary of the host events" } }
+        ],
+        "correct": ["opt_corr"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post26gaps",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "day_3",
+      "role": "analyst",
+      "topic": "timeline_construction",
+      "tags": ["post_test", "gaps"],
+      "stem": {
+        "en": "When a timeline contains a gap that cannot be filled with evidence, the gap should be omitted from the final timeline narrative to avoid undermining the analysis."
+      },
+      "payload": { "kind": "true_false", "correct": false },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post27memdec",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_3",
+      "role": "both",
+      "topic": "host_forensics",
+      "tags": ["post_test", "memory"],
+      "stem": {
+        "en": "An investigator arrives at a scene where a workstation is powered on, unlocked, and visibly running an encrypted-disk software in the active session. Memory analysis on this system MAY reveal:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_all",  "text": { "en": "All of the above (encryption keys, plaintext credentials, in-memory-only malicious code)" } },
+          { "id": "opt_keys", "text": { "en": "Disk-encryption keys held in memory while the volume is mounted" } },
+          { "id": "opt_pass", "text": { "en": "Plaintext passwords typed during the current login session" } },
+          { "id": "opt_proc", "text": { "en": "Currently-running malicious processes that did not touch disk" } }
+        ],
+        "correct": ["opt_all"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post28sourceconf",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_3",
+      "role": "both",
+      "topic": "timeline_construction",
+      "tags": ["post_test", "confidence"],
+      "stem": {
+        "en": "An IT director recalls 'the breach started Tuesday morning around 9 AM.' Forensic logs show authentication anomalies beginning at 7:42 AM on the prior Monday. The CORRECT timeline treatment is:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_both",   "text": { "en": "Include both with documented confidence — high for logs, moderate for recollection — and note that the recollection describes discovery, not start" } },
+          { "id": "opt_log",    "text": { "en": "Use only the forensic logs; discard the IT director's recollection" } },
+          { "id": "opt_recall", "text": { "en": "Use only the IT director's recollection; ignore the logs" } },
+          { "id": "opt_avg",    "text": { "en": "Average the times to produce a single 'best estimate' start point" } }
+        ],
+        "correct": ["opt_both"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "advanced", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post29confdm",
+      "version": 1,
+      "supersedes": null,
+      "type": "drag_match",
+      "day": "day_4",
+      "role": "analyst",
+      "topic": "confidence_language",
+      "tags": ["post_test", "confidence"],
+      "stem": {
+        "en": "Match each analytic situation to the confidence level that BEST describes it."
+      },
+      "payload": {
+        "kind": "drag_match",
+        "sources": [
+          { "id": "src_multi",    "text": { "en": "Multiple independent sources of high-quality evidence converge; few or no plausible alternatives" } },
+          { "id": "src_credible", "text": { "en": "Credibly sourced and plausibly correct, but plausible alternatives exist that cannot be fully excluded" } },
+          { "id": "src_fragmen",  "text": { "en": "Information is fragmentary; sources may be questionable; strong alternative explanations remain" } }
+        ],
+        "targets": [
+          { "id": "tgt_high", "text": { "en": "High confidence" } },
+          { "id": "tgt_mod",  "text": { "en": "Moderate confidence" } },
+          { "id": "tgt_low",  "text": { "en": "Low confidence" } }
+        ],
+        "matches": [
+          { "sourceId": "src_multi",    "targetId": "tgt_high" },
+          { "sourceId": "src_credible", "targetId": "tgt_mod" },
+          { "sourceId": "src_fragmen",  "targetId": "tgt_low" }
+        ],
+        "partialCredit": false
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post30intnotev",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "day_4",
+      "role": "both",
+      "topic": "attribution_methodology",
+      "tags": ["post_test", "intel_evidence"],
+      "stem": {
+        "en": "Intelligence-quality information and criminal-case-quality evidence are functionally interchangeable for purposes of supporting a federal indictment."
+      },
+      "payload": { "kind": "true_false", "correct": false },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post31anchored",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_4",
+      "role": "analyst",
+      "topic": "confidence_language",
+      "tags": ["post_test", "anchoring"],
+      "stem": {
+        "en": "When briefing an AUSA, the phrase 'we think it's probably them' is BEST replaced with:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_anchor",  "text": { "en": "'We assess with moderate confidence that the actor is X based on [specific basis], with [documented gaps].'" } },
+          { "id": "opt_likely",  "text": { "en": "'We assess it is likely them.'" } },
+          { "id": "opt_certain", "text": { "en": "'We are certain it is them.'" } },
+          { "id": "opt_quote",   "text": { "en": "'Our analyst said it's them.'" } }
+        ],
+        "correct": ["opt_anchor"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post32drift",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_4",
+      "role": "analyst",
+      "topic": "confidence_language",
+      "tags": ["post_test", "drift"],
+      "stem": {
+        "en": "An assessment was originally written at moderate confidence. By the time it reaches a third-tier reader in a downstream brief, it is being quoted as high confidence. This phenomenon is BEST described as:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_drift",   "text": { "en": "Confidence drift" } },
+          { "id": "opt_anchor",  "text": { "en": "Anchoring bias" } },
+          { "id": "opt_confirm", "text": { "en": "Confirmation bias" } },
+          { "id": "opt_mosaic",  "text": { "en": "Mosaic effect" } }
+        ],
+        "correct": ["opt_drift"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post33attrupd",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_4",
+      "role": "analyst",
+      "topic": "attribution_methodology",
+      "tags": ["post_test", "update"],
+      "stem": {
+        "en": "Mid-investigation, new evidence emerges that contradicts a portion of the team's earlier high-confidence attribution assessment. The CORRECT response is to:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_update", "text": { "en": "Update the assessment, document the change, and notify downstream consumers" } },
+          { "id": "opt_defend", "text": { "en": "Defend the original assessment until a definitive correction is required" } },
+          { "id": "opt_dual",   "text": { "en": "Maintain two parallel assessments and let consumers choose" } },
+          { "id": "opt_quiet",  "text": { "en": "Quietly revise the assessment and avoid drawing attention to the change" } }
+        ],
+        "correct": ["opt_update"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post34toolmatch",
+      "version": 1,
+      "supersedes": null,
+      "type": "drag_match",
+      "day": "day_4",
+      "role": "both",
+      "topic": "attribution_methodology",
+      "tags": ["post_test", "tool_selection"],
+      "stem": {
+        "en": "Match each investigative question to the tool category MOST appropriate to answer it."
+      },
+      "payload": {
+        "kind": "drag_match",
+        "sources": [
+          { "id": "src_dnshist", "text": { "en": "Has this domain ever resolved to a different IP, and when?" } },
+          { "id": "src_actor",   "text": { "en": "What known actor groups have been associated with this hash and TTP combination?" } },
+          { "id": "src_disk",    "text": { "en": "What persistence mechanism did the actor install on the compromised host?" } },
+          { "id": "src_handle",  "text": { "en": "What other forum handles has this actor used historically?" } }
+        ],
+        "targets": [
+          { "id": "tgt_pdns",   "text": { "en": "Passive DNS service" } },
+          { "id": "tgt_tip",    "text": { "en": "Threat intelligence platform (TIP)" } },
+          { "id": "tgt_forens", "text": { "en": "Host forensics suite" } },
+          { "id": "tgt_osint",  "text": { "en": "OSINT link-analysis / forum research" } }
+        ],
+        "matches": [
+          { "sourceId": "src_dnshist", "targetId": "tgt_pdns" },
+          { "sourceId": "src_actor",   "targetId": "tgt_tip" },
+          { "sourceId": "src_disk",    "targetId": "tgt_forens" },
+          { "sourceId": "src_handle",  "targetId": "tgt_osint" }
+        ],
+        "partialCredit": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post35aiprov",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "day_4",
+      "role": "both",
+      "topic": "chain_of_custody",
+      "tags": ["post_test", "ai_provenance"],
+      "stem": {
+        "en": "When using an LLM-assisted tool to summarize a large log dataset for a case file, the analyst's provenance documentation should include:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_full",    "text": { "en": "Model name, model version, prompt used, date of execution, and the LLM output preserved alongside the underlying log dataset" } },
+          { "id": "opt_outonly", "text": { "en": "Only the LLM output, since the underlying logs are already preserved" } },
+          { "id": "opt_class",   "text": { "en": "A classification of the output as 'AI-generated' with no further detail" } },
+          { "id": "opt_none",    "text": { "en": "No documentation is necessary if the analyst manually verified the summary" } }
+        ],
+        "correct": ["opt_full"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post36crossvalidate",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "day_4",
+      "role": "both",
+      "topic": "attribution_methodology",
+      "tags": ["post_test", "validation"],
+      "stem": {
+        "en": "Cross-tool validation is generally required for findings that will support consequential decisions such as charging, public attribution, or sanctions."
+      },
+      "payload": { "kind": "true_false", "correct": true },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post37toolfirst",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "day_4",
+      "role": "both",
+      "topic": "attribution_methodology",
+      "tags": ["post_test", "question_first"],
+      "stem": {
+        "en": "The right tool to use on a given investigative task is determined by the question being asked, not by which tool the investigator is most comfortable using."
+      },
+      "payload": { "kind": "true_false", "correct": true },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 3, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post38hybriddispo",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "cumulative",
+      "role": "both",
+      "topic": "disposition_options",
+      "tags": ["post_test", "hybrid"],
+      "stem": {
+        "en": "A team is considering a hybrid disposition combining indictment, joint takedown, and defensive notification. The PRINCIPAL trade-off to surface for senior leadership is:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_seq",   "text": { "en": "Sequencing and timing across workstreams: indictment unsealing, takedown timing, and defensive notification each leak information; coordinated timing is essential" } },
+          { "id": "opt_cost",  "text": { "en": "Resource cost of running multiple workstreams" } },
+          { "id": "opt_press", "text": { "en": "Whether the press release will be jointly issued" } },
+          { "id": "opt_scope", "text": { "en": "How many additional victims to notify" } }
+        ],
+        "correct": ["opt_seq"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 5, "difficulty": "advanced", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post39defnotif",
+      "version": 1,
+      "supersedes": null,
+      "type": "multiple_choice",
+      "day": "cumulative",
+      "role": "both",
+      "topic": "victim_engagement",
+      "tags": ["post_test", "defensive_notification"],
+      "stem": {
+        "en": "A defensive notification to a likely-but-unconfirmed victim of an active intrusion campaign should be calibrated to:"
+      },
+      "payload": {
+        "kind": "multiple_choice",
+        "selectionMode": "single",
+        "options": [
+          { "id": "opt_calibrated", "text": { "en": "Communicate the assessment with documented confidence and what action the victim should consider; allow the victim to investigate and respond" } },
+          { "id": "opt_certain",    "text": { "en": "Communicate certainty that the victim is compromised" } },
+          { "id": "opt_demand",     "text": { "en": "Demand that the victim begin remediation immediately" } },
+          { "id": "opt_vague",      "text": { "en": "Be deliberately vague to protect investigative interests" } }
+        ],
+        "correct": ["opt_calibrated"],
+        "shuffle": true
+      },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": false },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    },
+    {
+      "id": "q_post40honest",
+      "version": 1,
+      "supersedes": null,
+      "type": "true_false",
+      "day": "cumulative",
+      "role": "both",
+      "topic": "attribution_methodology",
+      "tags": ["post_test", "honest"],
+      "stem": {
+        "en": "When senior leadership prefers a particular disposition option, the analyst's role is to shape the attribution assessment to support that preferred option."
+      },
+      "payload": { "kind": "true_false", "correct": false },
+      "feedback": { "reference": "Post-test Form B" },
+      "scoring": { "points": 4, "difficulty": "core", "mustPass": true },
+      "status": "published",
+      "createdAt": "2026-05-05T14:00:00Z",
+      "updatedAt": "2026-05-05T14:00:00Z"
+    }
+  ]
+}

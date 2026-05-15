@@ -2,7 +2,7 @@ import type { Db } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 import { collectionName } from "../db/mongo.js";
 import { AppError } from "../errors/AppError.js";
-import type { ContentStatus, ContentType, PactAgsContext, PactAgsPublishAttempt, PactAnswerValue, PactAuditEvent, PactContent, PactContentProgress, PactNotification, PactQuestionAttempt, PactQuestionGrade, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
+import type { ContentMechanics, ContentStatus, ContentType, PactAgsContext, PactAgsPublishAttempt, PactAnswerValue, PactAuditEvent, PactContent, PactContentProgress, PactMechanicsState, PactNotification, PactQuestionAttempt, PactQuestionGrade, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
 
 export class PactRepository {
   constructor(private readonly db: Db, private readonly config: AppConfig) {}
@@ -365,6 +365,22 @@ export class PactRepository {
     return input.lmsLabel ? { ...content, lmsLabel: input.lmsLabel, updatedAt } : { ...content, lmsLabel: undefined, updatedAt };
   }
 
+  async updateContentMechanics(input: { contentId: string; mechanics: ContentMechanics | null; session: { role: PactRole; courseId: string; cohortId: string } }) {
+    const content = await this.requireContent(input.contentId);
+    if (content.courseId !== input.session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is outside this course");
+    }
+    if (input.mechanics && !mechanicsMatchesContentType(content.type, input.mechanics.kind)) {
+      throw new AppError(400, "MECHANICS_TYPE_MISMATCH", "Mechanics kind does not match content type");
+    }
+    const updatedAt = new Date().toISOString();
+    const update = input.mechanics
+      ? { $set: { mechanics: input.mechanics, updatedAt } }
+      : { $unset: { mechanics: 1 as const }, $set: { updatedAt } };
+    await this.content().updateOne({ id: input.contentId }, update);
+    return input.mechanics ? { ...content, mechanics: input.mechanics, updatedAt } : { ...content, mechanics: undefined, updatedAt };
+  }
+
   async upsertScore(input: {
     user: PactUser;
     contentId: string;
@@ -667,6 +683,7 @@ export class PactRepository {
     user: PactUser;
     content: PactContent;
     answers?: Record<string, PactAnswerValue>;
+    mechanicsState?: PactMechanicsState;
     progressPercent?: number;
     status?: PactContentProgress["status"];
     score?: number;
@@ -675,6 +692,7 @@ export class PactRepository {
     const now = new Date().toISOString();
     const existing = await this.contentProgress().findOne({ userId: input.user.id, contentId: input.content.id });
     const answers = input.answers ?? existing?.answers ?? {};
+    const mechanicsState = input.mechanicsState ?? existing?.mechanicsState;
     const answeredQuestionIds = Object.keys(answers).filter((questionId) => answers[questionId] !== undefined);
     const progressPercent = input.progressPercent ?? deriveProgressPercent(answeredQuestionIds.length, input.content);
     const status = input.status ?? (progressPercent > 0 ? "in_progress" : "not_started");
@@ -687,6 +705,7 @@ export class PactRepository {
       contentId: input.content.id,
       contentType: input.content.type,
       answers,
+      mechanicsState,
       answeredQuestionIds,
       progressPercent,
       score: input.score ?? existing?.score,
@@ -1045,6 +1064,13 @@ function withoutCursor(filter: Record<string, unknown>) {
 function deriveProgressPercent(answeredCount: number, content: PactContent) {
   const questionCount = content.questionCount ?? content.questions?.length ?? 0;
   return questionCount ? Math.min(100, Math.round((answeredCount / questionCount) * 100)) : 0;
+}
+
+function mechanicsMatchesContentType(type: ContentType, kind: ContentMechanics["kind"]) {
+  if (type === "challenge") return kind === "challenge_path";
+  if (type === "game") return kind === "packet_capture";
+  if (type === "assessment") return kind === "readiness_checklist";
+  return false;
 }
 
 function groupBy<T>(items: T[], keyFor: (item: T) => string) {

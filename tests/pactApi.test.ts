@@ -669,6 +669,7 @@ describe("PACT API", () => {
     ]);
     await db.collection("test_pactContent").insertMany([
       { ...publishedContent("content-control-module", null, "learner", "draft"), courseId: "pact-content-control" },
+      { ...publishedContent("content-control-game", null, "learner", "draft", "game"), courseId: "pact-content-control" },
       { ...publishedContent("content-control-other-course", null, "learner", "draft"), courseId: "pact-content-other-course" }
     ]);
 
@@ -720,6 +721,41 @@ describe("PACT API", () => {
       courseId: "pact-content-control",
       lmsLabel: "PACT LMS Module Launch"
     });
+
+    const mechanicsResponse = await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/admin/content/content-control-game/mechanics")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .send({
+        mechanics: {
+          kind: "packet_capture",
+          title: "Packet Capture",
+          prompt: "Capture evidence nodes.",
+          nodes: [
+            { id: "dns", label: "DNS", points: 5 },
+            { id: "proxy", label: "Proxy", points: 10 }
+          ],
+          maxScore: 15
+        }
+      })
+      .expect(200);
+
+    expect(mechanicsResponse.body).toMatchObject({
+      id: "content-control-game",
+      mechanics: { kind: "packet_capture", maxScore: 15 }
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/admin/content/content-control-game/mechanics")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .send({
+        mechanics: {
+          kind: "readiness_checklist",
+          title: "Wrong shell",
+          prompt: "Wrong shell.",
+          checks: [{ id: "ready", label: "Ready" }]
+        }
+      })
+      .expect(400);
 
     await request(createApp(config, createLogger(config)))
       .patch("/api/v1/admin/content/content-control-other-course/lms-label")
@@ -1866,6 +1902,11 @@ describe("PACT API", () => {
       },
       { upsert: true }
     );
+    await db.collection("test_pactContent").updateOne(
+      { id: "progress-game" },
+      { $set: { ...publishedContent("progress-game", "cohort-a", "learner", "published", "game") } },
+      { upsert: true }
+    );
     const token = await new SessionService(config.pactSessionSecret).sign({
       userId: "user-1",
       role: "learner",
@@ -1895,13 +1936,35 @@ describe("PACT API", () => {
     });
     expect(JSON.stringify(progressResponse.body)).not.toContain("unknown-question");
 
+    const gameProgressResponse = await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/progress-game/progress")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mechanicsState: {
+          kind: "packet_capture",
+          capturedNodeIds: ["dns"]
+        },
+        progressPercent: 50,
+        status: "in_progress"
+      })
+      .expect(200);
+
+    expect(gameProgressResponse.body).toMatchObject({
+      userId: "user-1",
+      contentId: "progress-game",
+      status: "in_progress",
+      progressPercent: 50,
+      mechanicsState: { kind: "packet_capture", capturedNodeIds: ["dns"] }
+    });
+
     const listResponse = await request(createApp(config, createLogger(config)))
       .get("/api/v1/content/progress")
       .set("authorization", `Bearer ${token}`)
       .expect(200);
 
     expect(listResponse.body.progress).toEqual(expect.arrayContaining([
-      expect.objectContaining({ contentId: "progress-content", progressPercent: 50 })
+      expect.objectContaining({ contentId: "progress-content", progressPercent: 50 }),
+      expect.objectContaining({ contentId: "progress-game", progressPercent: 50, mechanicsState: { kind: "packet_capture", capturedNodeIds: ["dns"] } })
     ]));
 
     await request(createApp(config, createLogger(config)))

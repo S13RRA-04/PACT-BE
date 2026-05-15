@@ -40,6 +40,7 @@ export type PactContent = {
   day?: string;
   questionCount?: number;
   questions?: PactQuestion[];
+  mechanics?: ContentMechanics;
   status: ContentStatus;
   createdAt: string;
   updatedAt: string;
@@ -81,6 +82,48 @@ export type PactQuestion = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ChallengeMechanics = {
+  kind: "challenge_path";
+  title: string;
+  prompt: string;
+  resultLabel?: string;
+  defaultPathId?: string;
+  paths: Array<{
+    id: string;
+    label: string;
+    detail: string;
+    score: number;
+  }>;
+};
+
+export type GameMechanics = {
+  kind: "packet_capture";
+  title: string;
+  prompt: string;
+  resultLabel?: string;
+  maxScore?: number;
+  initiallyCaptured?: string[];
+  nodes: Array<{
+    id: string;
+    label: string;
+    points: number;
+  }>;
+};
+
+export type AssessmentMechanics = {
+  kind: "readiness_checklist";
+  title: string;
+  prompt: string;
+  resultLabel?: string;
+  checks: Array<{
+    id: string;
+    label: string;
+    initiallyChecked?: boolean;
+  }>;
+};
+
+export type ContentMechanics = ChallengeMechanics | GameMechanics | AssessmentMechanics;
 
 export type PactScore = {
   id: string;
@@ -146,6 +189,7 @@ export type PactNotification = {
 };
 
 export type PactAnswerValue = string | string[] | Record<string, string> | boolean;
+export type PactMechanicsState = Record<string, unknown>;
 
 export type PactContentProgress = {
   id: string;
@@ -156,6 +200,7 @@ export type PactContentProgress = {
   contentId: string;
   contentType: ContentType;
   answers: Record<string, PactAnswerValue>;
+  mechanicsState?: PactMechanicsState;
   answeredQuestionIds: string[];
   progressPercent: number;
   score?: number;

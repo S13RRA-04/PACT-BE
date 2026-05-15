@@ -71,9 +71,19 @@ This removes the older same-named scheduled tasks and obsolete local sink servic
 
 Do not put Mongo credentials, LTI private keys, Keycloak secrets, or API tokens in frontend repositories or Cloudflare Pages variables.
 
-## Importing PACT modules
+## Importing PACT content
 
-Question-bank JSON files can be imported as published PACT modules. Each source file becomes one `pactContent` module with the full validated question payload stored server-side.
+Question-bank JSON files can be imported as published PACT content with the full validated question payload stored server-side. Lecture banks import as modules. The bundled `pretest_questions.json` and `posttest_questions.json` banks import as assessment content.
+
+```powershell
+npm run assessments:import
+```
+
+Use the guarded production variant when importing the bundled pre/post assessments into production:
+
+```powershell
+npm run assessments:import:production
+```
 
 ```powershell
 npm run modules:import:production -- --course-id pact `

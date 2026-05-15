@@ -11,6 +11,8 @@
     "db:migrate:scoring": "tsx src/db/migrateScoringFields.ts",
     "modules:import": "tsx src/content/importPactModules.ts",
     "modules:import:production": "tsx src/content/importPactModulesProduction.ts",
+    "assessments:import": "tsx src/content/importPactModules.ts --course-id pact src/content/question-banks/pretest_questions.json src/content/question-banks/posttest_questions.json",
+    "assessments:import:production": "tsx src/content/importPactModulesProduction.ts --course-id pact src/content/question-banks/pretest_questions.json src/content/question-banks/posttest_questions.json",
     "deploy:staging": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-worker-staging.ps1",
     "deploy:production": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-worker-production.ps1",
     "deploy:worker:staging": "npm run deploy:staging",

@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { z } from "zod";
-import type { PactContent, PactQuestion } from "../domain/types.js";
+import type { ContentType, PactContent, PactQuestion } from "../domain/types.js";
 
 const localizedTextSchema = z.record(z.string().min(1));
 
@@ -63,17 +63,18 @@ export function contentFromQuestionBank(input: QuestionBankImportInput): Questio
     return { skippedQuestionIds };
   }
 
+  const contentType = contentTypeFromFileName(input.fileName);
   const title = titleFromFileName(input.fileName);
   const days = [...new Set(questions.map((question) => question.day))];
 
   return {
     skippedQuestionIds,
     content: {
-      id: stableContentId(input.fileName),
+      id: stableContentId(input.fileName, contentType),
       courseId: input.courseId,
       cohortId: input.cohortId,
       role: "all",
-      type: "module",
+      type: contentType,
       title,
       prompt: parsed.$comment ?? `${title} question bank`,
       maxScore: questions.reduce((total, question) => total + question.scoring.points, 0),
@@ -85,12 +86,14 @@ export function contentFromQuestionBank(input: QuestionBankImportInput): Questio
   };
 }
 
-function stableContentId(fileName: string) {
-  return `module-${normalizedBaseName(fileName).replace(/-questions$/, "")}`;
+function stableContentId(fileName: string, contentType: ContentType) {
+  return `${contentType}-${normalizedBaseName(fileName).replace(/-questions$/, "")}`;
 }
 
 function titleFromFileName(fileName: string) {
   const base = normalizedBaseName(fileName).replace(/-questions$/, "");
+  if (base === "pretest") return "Pre-test";
+  if (base === "posttest") return "Post-test";
   return base
     .split("-")
     .map((part) => {
@@ -99,6 +102,11 @@ function titleFromFileName(fileName: string) {
       return part.charAt(0).toUpperCase() + part.slice(1);
     })
     .join(" ");
+}
+
+function contentTypeFromFileName(fileName: string): ContentType {
+  const base = normalizedBaseName(fileName).replace(/-questions$/, "");
+  return /^(pretest|posttest)$/.test(base) ? "assessment" : "module";
 }
 
 function normalizedBaseName(fileName: string) {

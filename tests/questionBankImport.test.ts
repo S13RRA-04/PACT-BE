@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { contentFromQuestionBank } from "../src/content/questionBankImport.js";
 
 describe("question bank import", () => {
@@ -45,7 +46,47 @@ describe("question bank import", () => {
     expect(result.content).toBeUndefined();
     expect(result.skippedQuestionIds).toEqual(["q-duplicate"]);
   });
+
+  it("maps bundled pre-test and post-test banks to published assessments", () => {
+    const pretest = contentFromQuestionBank({
+      fileName: "pretest_questions.json",
+      rawJson: readBundledQuestionBank("pretest_questions.json"),
+      courseId: "pact"
+    });
+    const posttest = contentFromQuestionBank({
+      fileName: "posttest_questions.json",
+      rawJson: readBundledQuestionBank("posttest_questions.json"),
+      courseId: "pact"
+    });
+
+    expect(pretest.content).toMatchObject({
+      id: "assessment-pretest",
+      type: "assessment",
+      title: "Pre-test",
+      questionCount: 40,
+      maxScore: 119,
+      day: "mixed",
+      status: "published"
+    });
+    expect(pretest.content?.questions?.every((question) => question.scoring.mustPass === false)).toBe(true);
+
+    expect(posttest.content).toMatchObject({
+      id: "assessment-posttest",
+      type: "assessment",
+      title: "Post-test",
+      questionCount: 40,
+      maxScore: 140,
+      day: "mixed",
+      status: "published"
+    });
+    expect(posttest.content?.questions?.some((question) => question.scoring.mustPass === true)).toBe(true);
+    expect(posttest.content?.questions?.some((question) => question.payload.kind === "drag_match" && question.payload.partialCredit === false)).toBe(true);
+  });
 });
+
+function readBundledQuestionBank(fileName: string) {
+  return readFileSync(new URL(`../src/content/question-banks/${fileName}`, import.meta.url), "utf8");
+}
 
 function questionBank(questionId: string) {
   return {

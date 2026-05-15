@@ -21,6 +21,52 @@ export const squadAssignmentSchema = z.object({
   message: "squadId or squadNumber is required"
 });
 
+const challengeMechanicsSchema = z.object({
+  kind: z.literal("challenge_path"),
+  title: z.string().min(1).max(160),
+  prompt: z.string().min(1).max(1200),
+  resultLabel: z.string().min(1).max(80).optional(),
+  defaultPathId: z.string().min(1).max(80).optional(),
+  paths: z.array(z.object({
+    id: z.string().min(1).max(80),
+    label: z.string().min(1).max(120),
+    detail: z.string().min(1).max(400),
+    score: z.number().min(0).max(100)
+  })).min(1).max(6)
+});
+
+const gameMechanicsSchema = z.object({
+  kind: z.literal("packet_capture"),
+  title: z.string().min(1).max(160),
+  prompt: z.string().min(1).max(1200),
+  resultLabel: z.string().min(1).max(80).optional(),
+  maxScore: z.number().positive().max(100000).optional(),
+  initiallyCaptured: z.array(z.string().min(1).max(80)).max(24).optional(),
+  nodes: z.array(z.object({
+    id: z.string().min(1).max(80),
+    label: z.string().min(1).max(120),
+    points: z.number().min(0).max(100000)
+  })).min(1).max(24)
+});
+
+const assessmentMechanicsSchema = z.object({
+  kind: z.literal("readiness_checklist"),
+  title: z.string().min(1).max(160),
+  prompt: z.string().min(1).max(1200),
+  resultLabel: z.string().min(1).max(80).optional(),
+  checks: z.array(z.object({
+    id: z.string().min(1).max(80),
+    label: z.string().min(1).max(160),
+    initiallyChecked: z.boolean().optional()
+  })).min(1).max(12)
+});
+
+const contentMechanicsSchema = z.discriminatedUnion("kind", [
+  challengeMechanicsSchema,
+  gameMechanicsSchema,
+  assessmentMechanicsSchema
+]);
+
 export const contentCreateSchema = z.object({
   id: z.string().optional(),
   courseId: z.string().min(1),
@@ -32,8 +78,48 @@ export const contentCreateSchema = z.object({
   prompt: z.string().min(1).max(4000),
   maxScore: z.number().nonnegative(),
   lineItemUrl: z.string().url().optional(),
+  mechanics: contentMechanicsSchema.optional(),
   status: z.enum(["draft", "published", "archived"]).default("draft")
+}).superRefine((content, ctx) => {
+  if (!content.mechanics) return;
+  const mechanics = content.mechanics;
+  const expectedKind = expectedMechanicsKind(content.type);
+  if (expectedKind && mechanics.kind !== expectedKind) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${content.type} content must use ${expectedKind} mechanics`,
+      path: ["mechanics", "kind"]
+    });
+  }
+  if (content.type === "module") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "module content does not support mechanics",
+      path: ["mechanics"]
+    });
+  }
+  if (mechanics.kind === "challenge_path" && mechanics.defaultPathId && !mechanics.paths.some((path) => path.id === mechanics.defaultPathId)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "defaultPathId must match one of the challenge paths",
+      path: ["mechanics", "defaultPathId"]
+    });
+  }
+  if (mechanics.kind === "packet_capture" && (mechanics.initiallyCaptured ?? []).some((id) => !mechanics.nodes.some((node) => node.id === id))) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "initiallyCaptured ids must match game nodes",
+      path: ["mechanics", "initiallyCaptured"]
+    });
+  }
 });
+
+function expectedMechanicsKind(type: "module" | "challenge" | "game" | "assessment") {
+  if (type === "challenge") return "challenge_path";
+  if (type === "game") return "packet_capture";
+  if (type === "assessment") return "readiness_checklist";
+  return undefined;
+}
 
 export const contentStatusUpdateSchema = z.object({
   status: z.enum(["draft", "published", "archived"])
@@ -45,6 +131,10 @@ export const contentAssignmentUpdateSchema = z.object({
 
 export const contentLmsLabelUpdateSchema = z.object({
   lmsLabel: z.string().min(1).max(200).nullable()
+});
+
+export const contentMechanicsUpdateSchema = z.object({
+  mechanics: contentMechanicsSchema.nullable()
 });
 
 export const scoreSubmitSchema = z.object({
@@ -64,6 +154,7 @@ const answerValueSchema = z.union([
 
 export const contentProgressUpdateSchema = z.object({
   answers: z.record(z.string().min(1).max(200), answerValueSchema).optional(),
+  mechanicsState: z.record(z.unknown()).optional(),
   progressPercent: z.number().min(0).max(100).optional(),
   status: z.enum(["not_started", "in_progress", "submitted"]).optional()
 });
