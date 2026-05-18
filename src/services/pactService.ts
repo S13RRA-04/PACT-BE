@@ -264,6 +264,7 @@ export class PactService {
       this.repository.getScoreForUserContent(user.id, content.id),
       this.repository.listProgressForUser(user, [content.id]).then((items) => items[0])
     ]);
+    this.assertAssessmentCanSubmit(content, existingProgress);
     const submittedAt = new Date().toISOString();
     const comment = buildAssessmentTimingComment(content, existingProgress, submittedAt);
     const scoreAlreadyPublished = assignmentComplete && isSamePublishedScore(existingScore, {
@@ -307,6 +308,10 @@ export class PactService {
     const user = await this.repository.requireUser(session.userId);
     const content = await this.repository.requireContent(contentId);
     this.requireLearnerContentAccess(user, content);
+    const existingProgress = (await this.repository.listProgressForUser(user, [content.id]))[0];
+    if (content.type === "assessment" && existingProgress?.status === "submitted") {
+      throw new AppError(409, "ASSESSMENT_ALREADY_SUBMITTED", "Assessment has already been submitted");
+    }
     const answers = input.answers ? filterAnswersForContent(content, input.answers) : undefined;
     return this.repository.upsertContentProgress({
       user,
@@ -325,6 +330,8 @@ export class PactService {
     const user = await this.repository.requireUser(session.userId);
     const content = await this.repository.requireContent(contentId);
     this.requireLearnerContentAccess(user, content);
+    const existingProgress = (await this.repository.listProgressForUser(user, [content.id]))[0];
+    this.assertAssessmentCanSubmit(content, existingProgress);
     const question = content.questions?.find((item) => item.id === questionId);
     if (!question) throw new AppError(404, "QUESTION_NOT_FOUND", "PACT question was not found for this content");
     const existingAttemptCount = await this.repository.countQuestionAttemptsForUserContentQuestion({ user, content, questionId });
@@ -346,7 +353,6 @@ export class PactService {
       isCorrect: !isManualQuestion(question) && score >= maxScore,
       feedbackExposed: input.feedbackExposed
     });
-    const existingProgress = (await this.repository.listProgressForUser(user, [content.id]))[0];
     const answers = { ...(existingProgress?.answers ?? {}), [questionId]: input.answer };
     const progress = await this.repository.upsertContentProgress({
       user,
@@ -432,8 +438,16 @@ export class PactService {
 
     const scoreValue = completion.score;
     const maxScore = completion.maxScore;
-    const input = { score: scoreValue, progressPercent: 100 };
-    const existingScore = await this.repository.getScoreForUserContent(user.id, content.id);
+    const submittedAt = new Date().toISOString();
+    const [existingScore, existingProgress] = await Promise.all([
+      this.repository.getScoreForUserContent(user.id, content.id),
+      this.repository.listProgressForUser(user, [content.id]).then((items) => items[0])
+    ]);
+    const input = {
+      score: scoreValue,
+      progressPercent: 100,
+      comment: buildAssessmentTimingComment(content, existingProgress, submittedAt)
+    };
     const agsStatus = isSamePublishedScore(existingScore, { ...input, maxScore })
       ? await this.recordSkippedDuplicateAgsAttempt(user, content, input, maxScore)
       : await this.enqueueFinalAgsPublish(user, content, input, maxScore);
@@ -452,6 +466,7 @@ export class PactService {
         content,
         progressPercent: 100,
         status: "submitted",
+        submittedAt,
         score: scoreValue,
         maxScore
       })
@@ -658,6 +673,16 @@ export class PactService {
       errorMessage: isAppError(error) ? error.message : undefined
     });
   }
+
+  private assertAssessmentCanSubmit(content: PactContent, progress: PactContentProgress | undefined) {
+    if (content.type !== "assessment") return;
+    if (progress?.status === "submitted") {
+      throw new AppError(409, "ASSESSMENT_ALREADY_SUBMITTED", "Assessment has already been submitted");
+    }
+    if (!assessmentStartedAt(progress)) {
+      throw new AppError(409, "ASSESSMENT_NOT_STARTED", "Assessment must be started before answers can be submitted");
+    }
+  }
 }
 
 function isFullCreditManualGrade(score: number, maxScore: number) {
@@ -751,18 +776,19 @@ function isSamePublishedScore(
 }
 
 function buildAssessmentTimingComment(content: PactContent, progress: PactContentProgress | undefined, submittedAt: string) {
-  if (content.type !== "assessment" || content.mechanics?.kind !== "readiness_checklist") return undefined;
-  if (content.mechanics.timing?.enabled === false) return undefined;
+  if (content.type !== "assessment") return undefined;
+  if (content.mechanics?.kind === "readiness_checklist" && content.mechanics.timing?.enabled === false) return undefined;
 
   const startedAt = assessmentStartedAt(progress);
   const elapsedSeconds = startedAt ? Math.max(0, Math.round((Date.parse(submittedAt) - Date.parse(startedAt)) / 1000)) : undefined;
-  const timeLimitSeconds = content.mechanics.timing?.timeLimitSeconds;
+  const timing = content.mechanics?.kind === "readiness_checklist" ? content.mechanics.timing : undefined;
+  const timeLimitSeconds = timing?.timeLimitSeconds;
   const payload = {
     pactAssessmentTiming: {
       contentId: content.id,
       contentType: content.type,
-      startTrigger: content.mechanics.timing?.startTrigger ?? "learner_start",
-      submitTrigger: content.mechanics.timing?.submitTrigger ?? "content_submit",
+      startTrigger: timing?.startTrigger ?? "learner_start",
+      submitTrigger: timing?.submitTrigger ?? "content_submit",
       startedAt,
       submittedAt,
       elapsedSeconds,

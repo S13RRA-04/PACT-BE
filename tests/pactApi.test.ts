@@ -168,10 +168,49 @@ describe("PACT API", () => {
       .expect(200);
     expect(initialResponse.body.map((item: { id: string }) => item.id)).toEqual(["unlocked-content"]);
 
+    const diagnosticResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/diagnostics/content-access")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .expect(200);
+    expect(diagnosticResponse.body.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        contentId: "locked-default-content",
+        learnerVisible: false,
+        blockers: expect.arrayContaining(["unlocked"])
+      }),
+      expect.objectContaining({
+        contentId: "locked-explicit-content",
+        learnerVisible: false,
+        blockers: expect.arrayContaining(["unlocked"])
+      }),
+      expect.objectContaining({
+        contentId: "unlocked-content",
+        learnerVisible: true,
+        blockers: []
+      })
+    ]));
+
     await request(createApp(config, createLogger(config)))
       .patch("/api/v1/content/locked-explicit-content/progress")
       .set("authorization", `Bearer ${learnerToken}`)
       .send({ progressPercent: 25 })
+      .expect(403)
+      .expect((response) => {
+        expect(response.body.error).toMatchObject({ code: "CONTENT_LOCKED" });
+      });
+
+    await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content/locked-default-content/completion")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .expect(403)
+      .expect((response) => {
+        expect(response.body.error).toMatchObject({ code: "CONTENT_LOCKED" });
+      });
+
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/scores")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .send({ contentId: "locked-explicit-content", score: 1, maxScore: 10, progressPercent: 100 })
       .expect(403)
       .expect((response) => {
         expect(response.body.error).toMatchObject({ code: "CONTENT_LOCKED" });
@@ -197,6 +236,45 @@ describe("PACT API", () => {
       .set("authorization", `Bearer ${learnerToken}`)
       .send({ progressPercent: 25 })
       .expect(200);
+  });
+
+  it("locks all published course content for a one-time admin reset", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertOne({
+      id: "bulk-lock-admin",
+      lmsUserId: "lms-bulk-lock-admin",
+      role: "admin",
+      courseId: "pact-bulk-lock",
+      cohortId: "cohort-bulk-lock",
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContent").insertMany([
+      { ...publishedContent("bulk-published-one", "cohort-bulk-lock", "learner", "published", "module", false), courseId: "pact-bulk-lock" },
+      { ...publishedContent("bulk-published-two", "cohort-bulk-lock", "learner", "published", "assessment", false), courseId: "pact-bulk-lock" },
+      { ...publishedContent("bulk-draft", "cohort-bulk-lock", "learner", "draft", "module", false), courseId: "pact-bulk-lock" },
+      { ...publishedContent("bulk-other-course", "cohort-bulk-lock", "learner", "published", "module", false), courseId: "pact-other-course" }
+    ]);
+    const adminToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "bulk-lock-admin",
+      role: "admin",
+      courseId: "pact-bulk-lock",
+      cohortId: "cohort-bulk-lock"
+    });
+
+    const response = await request(createApp(config, createLogger(config)))
+      .post("/api/v1/admin/content/lock-published")
+      .set("authorization", `Bearer ${adminToken}`)
+      .send({})
+      .expect(200);
+
+    expect(response.body).toMatchObject({ matched: 2, modified: 2 });
+    const content = await db.collection("test_pactContent").find({ id: /^bulk-/ }).sort({ id: 1 }).toArray();
+    expect(content.find((item) => item.id === "bulk-published-one")?.locked).toBe(true);
+    expect(content.find((item) => item.id === "bulk-published-two")?.locked).toBe(true);
+    expect(content.find((item) => item.id === "bulk-draft")?.locked).toBe(false);
+    expect(content.find((item) => item.id === "bulk-other-course")?.locked).toBe(false);
   });
 
   it("scopes learner content to the launched content type", async () => {
@@ -327,6 +405,7 @@ describe("PACT API", () => {
       publishedContent("admin-visible-other-cohort", "cohort-b", "learner", "draft"),
       publishedContent("admin-visible-global", null, "learner", "draft")
     ]);
+    await db.collection("test_pactContent").updateOne({ id: "admin-visible-draft" }, { $unset: { locked: "" } });
 
     const adminToken = await new SessionService(config.pactSessionSecret).sign({
       userId: "admin-visible",
@@ -361,6 +440,10 @@ describe("PACT API", () => {
       "admin-visible-other-cohort",
       "admin-visible-global"
     ]));
+    expect(adminResponse.body.find((item: { id: string }) => item.id === "admin-visible-draft")).toMatchObject({
+      id: "admin-visible-draft",
+      locked: true
+    });
   });
 
   it("returns admin-only session diagnostics with visible content count", async () => {
@@ -873,6 +956,7 @@ describe("PACT API", () => {
       id: "content-control-created",
       courseId: "pact-content-control",
       cohortId: "cohort-content-b",
+      locked: true,
       status: "published"
     });
 
@@ -1055,6 +1139,128 @@ describe("PACT API", () => {
     } finally {
       fetchMock.mockRestore();
     }
+  });
+
+  it("requires question assessments to start before answer submission and queues AGS timing metadata", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactContent").updateOne(
+      { id: "question-timed-assessment" },
+      {
+        $set: {
+          ...publishedContent("question-timed-assessment", "cohort-a", "learner", "published", "assessment"),
+          lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/question-timed-assessment",
+          questionCount: 2,
+          mechanics: {
+            kind: "readiness_checklist",
+            title: "Question timed assessment",
+            prompt: "Complete this question assessment in one sitting.",
+            timing: {
+              enabled: true,
+              timeLimitSeconds: 120,
+              startTrigger: "learner_start",
+              submitTrigger: "content_submit"
+            },
+            checks: [{ id: "assessment-start", label: "Assessment started" }]
+          },
+          questions: [
+            {
+              id: "question-timed-q1",
+              version: 1,
+              topic: "First",
+              payload: { kind: "true_false", correct: true },
+              feedback: { correct: { en: "Right." }, incorrect: { en: "Review the item." } },
+              scoring: { points: 4, difficulty: "easy", mustPass: false }
+            },
+            {
+              id: "question-timed-q2",
+              version: 1,
+              topic: "Second",
+              payload: { kind: "multiple_choice", correct: ["b"] },
+              feedback: { correct: { en: "Good choice." }, incorrect: { en: "Review the scenario." } },
+              scoring: { points: 6, difficulty: "easy", mustPass: false }
+            }
+          ]
+        }
+      },
+      { upsert: true }
+    );
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "user-1",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-a",
+      squadId: "squad-1"
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/question-timed-assessment/questions/question-timed-q1/attempts")
+      .set("authorization", `Bearer ${token}`)
+      .send({ answer: true, feedbackExposed: true })
+      .expect(409);
+
+    const startedAt = new Date(Date.now() - 90_000).toISOString();
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/question-timed-assessment/progress")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mechanicsState: {
+          kind: "assessment_session",
+          startedAt,
+          timing: {
+            startTrigger: "learner_start",
+            submitTrigger: "content_submit"
+          }
+        },
+        progressPercent: 0,
+        status: "in_progress"
+      })
+      .expect(200);
+
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/question-timed-assessment/questions/question-timed-q1/attempts")
+      .set("authorization", `Bearer ${token}`)
+      .send({ answer: true, feedbackExposed: true })
+      .expect(201);
+    const finalAttempt = await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/question-timed-assessment/questions/question-timed-q2/attempts")
+      .set("authorization", `Bearer ${token}`)
+      .send({ answer: ["b"], feedbackExposed: true })
+      .expect(201);
+
+    expect(finalAttempt.body.progress).toMatchObject({
+      contentId: "question-timed-assessment",
+      status: "submitted",
+      startedAt,
+      submittedAt: expect.any(String)
+    });
+
+    const queuedAttempt = await db.collection("test_pactAgsPublishAttempts").findOne({
+      userId: "user-1",
+      contentId: "question-timed-assessment"
+    });
+    expect(queuedAttempt).toMatchObject({
+      status: "pending",
+      score: 10,
+      maxScore: 10,
+      progressPercent: 100
+    });
+    const timingPackage = JSON.parse(queuedAttempt?.comment as string).pactAssessmentTiming;
+    expect(timingPackage).toMatchObject({
+      contentId: "question-timed-assessment",
+      contentType: "assessment",
+      startTrigger: "learner_start",
+      submitTrigger: "content_submit",
+      startedAt,
+      timeLimitSeconds: 120,
+      expired: false
+    });
+    expect(timingPackage.elapsedSeconds).toBeGreaterThanOrEqual(80);
+
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/question-timed-assessment/questions/question-timed-q2/attempts")
+      .set("authorization", `Bearer ${token}`)
+      .send({ answer: ["b"], feedbackExposed: true })
+      .expect(409);
   });
 
   it("does not republish identical already-published scores to LMS AGS", async () => {
@@ -3088,6 +3294,55 @@ describe("PACT API", () => {
       .set("x-csrf-token", csrfToken)
       .send({ progressPercent: 25 })
       .expect(200);
+  });
+
+  it("prefers explicit bearer sessions over stale PACT cookies", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "stale-cookie-admin",
+        lmsUserId: "lms-stale-cookie-admin",
+        role: "admin",
+        courseId: "pact-stale-cookie",
+        cohortId: "cohort-stale-cookie",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "bearer-learner",
+        lmsUserId: "lms-bearer-learner",
+        role: "learner",
+        courseId: "pact-stale-cookie",
+        cohortId: "cohort-stale-cookie",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+
+    const adminCookieToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "stale-cookie-admin",
+      role: "admin",
+      courseId: "pact-stale-cookie",
+      cohortId: "cohort-stale-cookie"
+    });
+    const learnerBearerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "bearer-learner",
+      role: "learner",
+      courseId: "pact-stale-cookie",
+      cohortId: "cohort-stale-cookie"
+    });
+
+    const response = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/session")
+      .set("cookie", `${pactSessionCookieName}=${encodeURIComponent(adminCookieToken)}`)
+      .set("authorization", `Bearer ${learnerBearerToken}`)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      userId: "bearer-learner",
+      role: "learner"
+    });
   });
 
   it("returns a signed Deep Linking JSON payload for frontend relays", async () => {

@@ -11,12 +11,12 @@ export function currentSession(config: AppConfig) {
     try {
       const cookieToken = readSessionCookie(req.header("cookie"));
       const bearerToken = readBearer(req.header("authorization"));
-      const token = cookieToken ?? bearerToken;
+      const token = bearerToken ?? cookieToken;
       if (!token) {
         throw new AppError(401, "AUTH_REQUIRED", "Authentication is required");
       }
       req.pactSession = await sessions.verify(token);
-      req.pactSessionAuth = cookieToken ? "cookie" : "bearer";
+      req.pactSessionAuth = bearerToken ? "bearer" : "cookie";
       next();
     } catch (error) {
       next(error);

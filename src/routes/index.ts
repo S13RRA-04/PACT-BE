@@ -213,6 +213,15 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/admin/diagnostics/content-access", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json({ items: await repository.listContentAccessDiagnostics(requireSession(req)) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/admin/diagnostics/ags-token-context", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       res.status(200).json(await pactService(config).then((service) => service.getAgsTokenContextDiagnostic(requireSession(req))));
@@ -275,6 +284,15 @@ export function createApiRouter(config: AppConfig) {
         req.params.attemptId,
         agsPublishRetrySchema.parse(req.body)
       )));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/content/lock-published", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json(await repository.lockPublishedContentForManagement(requireSession(req)));
     } catch (error) {
       next(error);
     }

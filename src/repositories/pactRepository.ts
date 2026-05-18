@@ -1,4 +1,4 @@
-import type { Db } from "mongodb";
+import type { Db, Filter } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 import { collectionName } from "../db/mongo.js";
 import { AppError } from "../errors/AppError.js";
@@ -207,7 +207,14 @@ export class PactRepository {
   async upsertContent(input: Omit<PactContent, "id" | "createdAt" | "updatedAt"> & { id?: string }) {
     const now = new Date().toISOString();
     const id = input.id ?? crypto.randomUUID();
-    const content: PactContent = { ...input, id, createdAt: now, updatedAt: now };
+    const existing = await this.content().findOne({ id });
+    const content: PactContent = {
+      ...input,
+      locked: input.locked ?? existing?.locked ?? true,
+      id,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    };
     await this.content().updateOne({ id }, { $set: content }, { upsert: true });
     return content;
   }
@@ -223,21 +230,23 @@ export class PactRepository {
   async listContentFor(user: PactUser, contentType?: ContentType, contentId?: string) {
     const idFilter = contentId ? { id: contentId } : {};
     if (user.role === "admin") {
-      return this.content()
+      const content = await this.content()
         .find({ courseId: user.courseId, ...idFilter })
         .sort({ type: 1, title: 1 })
         .toArray();
+      return content.map(normalizeContentDefaults);
     }
 
     if (user.role === "instructor") {
-      return this.content()
+      const content = await this.content()
         .find({ courseId: user.courseId, ...idFilter })
         .sort({ type: 1, title: 1 })
         .toArray();
+      return content.map(normalizeContentDefaults);
     }
 
     const typeFilter = contentType ? { type: contentType } : {};
-    return this.content()
+    const content = await this.content()
       .find({
         courseId: user.courseId,
         ...idFilter,
@@ -249,6 +258,7 @@ export class PactRepository {
       })
       .sort({ type: 1, title: 1 })
       .toArray();
+    return content.map(normalizeContentDefaults);
   }
 
   async listDeepLinkableContent(courseId?: string) {
@@ -266,10 +276,11 @@ export class PactRepository {
   async listContentForManagement(session: { role: PactRole; courseId: string; cohortId: string }) {
     const filter: Record<string, unknown> = { courseId: session.courseId };
 
-    return this.content()
+    const content = await this.content()
       .find(filter)
       .sort({ type: 1, title: 1 })
       .toArray();
+    return content.map(normalizeContentDefaults);
   }
 
   async listLmsLabelsForDeepLink(courseId?: string) {
@@ -328,6 +339,77 @@ export class PactRepository {
       },
       { $sort: { courseId: 1, cohortId: 1, type: 1, status: 1 } }
     ]).toArray();
+  }
+
+  async listContentAccessDiagnostics(session: { role: PactRole; courseId: string; cohortId: string; contentType?: ContentType; contentId?: string }) {
+    const content = await this.content()
+      .find({ courseId: session.courseId })
+      .sort({ type: 1, title: 1 })
+      .toArray();
+
+    return content.map((item) => {
+      const checks = [
+        {
+          code: "published",
+          label: item.status === "published" ? "Published" : `Status is ${item.status ?? "draft"}`,
+          passed: item.status === "published"
+        },
+        {
+          code: "unlocked",
+          label: item.locked === false ? "Unlocked for learners" : "Locked by instructor/admin",
+          passed: item.locked === false
+        },
+        {
+          code: "learner_role",
+          label: item.role === "learner" || item.role === "all" ? `Visible to ${item.role}` : `Role target is ${item.role}`,
+          passed: item.role === "learner" || item.role === "all"
+        },
+        {
+          code: "cohort_scope",
+          label: cohortMatches(item.cohortId, session.cohortId) ? `Matches ${item.cohortId ?? "all cohorts"}` : `Assigned to ${item.cohortId}`,
+          passed: cohortMatches(item.cohortId, session.cohortId)
+        },
+        {
+          code: "launch_type",
+          label: !session.contentType || item.type === session.contentType ? "Matches launch type" : `Launch is ${session.contentType}`,
+          passed: !session.contentType || item.type === session.contentType
+        },
+        {
+          code: "launch_content",
+          label: !session.contentId || item.id === session.contentId ? "Matches launch content" : `Launch content is ${session.contentId}`,
+          passed: !session.contentId || item.id === session.contentId
+        }
+      ];
+
+      return {
+        contentId: item.id,
+        title: item.title,
+        type: item.type,
+        status: item.status,
+        locked: item.locked ?? true,
+        cohortId: item.cohortId ?? null,
+        role: item.role,
+        learnerVisible: checks.every((check) => check.passed),
+        checks,
+        blockers: checks.filter((check) => !check.passed).map((check) => check.code)
+      };
+    });
+  }
+
+  async lockPublishedContentForManagement(session: { role: PactRole; courseId: string; cohortId: string }) {
+    const updatedAt = new Date().toISOString();
+    const filter: Filter<PactContent> = {
+      courseId: session.courseId,
+      status: "published",
+      locked: { $ne: true }
+    };
+    const matched = await this.content().countDocuments(filter);
+    const result = await this.content().updateMany(filter, { $set: { locked: true, updatedAt } });
+    return {
+      matched,
+      modified: result.modifiedCount,
+      updatedAt
+    };
   }
 
   async countPublishedModulesForCourse(courseId: string) {
@@ -1121,6 +1203,17 @@ function groupBy<T>(items: T[], keyFor: (item: T) => string) {
 
 function globalOrCohortFilter(cohortId: string) {
   return [{ cohortId }, { cohortId: null }, { cohortId: { $exists: false } }];
+}
+
+function cohortMatches(contentCohortId: string | null | undefined, learnerCohortId: string) {
+  return !contentCohortId || contentCohortId === learnerCohortId;
+}
+
+function normalizeContentDefaults(content: PactContent): PactContent {
+  return {
+    ...content,
+    locked: content.locked ?? true
+  };
 }
 
 function squadNumberFromName(name: string): SquadNumber | undefined {

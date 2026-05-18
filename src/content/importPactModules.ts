@@ -48,7 +48,8 @@ try {
           updatedAt: new Date().toISOString()
         },
         $setOnInsert: {
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          locked: true
         }
       },
       { upsert: true }

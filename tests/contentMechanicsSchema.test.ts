@@ -10,6 +10,15 @@ const baseContent = {
 };
 
 describe("content mechanics schema", () => {
+  it("locks newly created content by default", () => {
+    const parsed = contentCreateSchema.parse({
+      ...baseContent,
+      type: "module"
+    });
+
+    expect(parsed.locked).toBe(true);
+  });
+
   it("accepts backend-driven game mechanics", () => {
     const parsed = contentCreateSchema.parse({
       ...baseContent,
