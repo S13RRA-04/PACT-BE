@@ -509,7 +509,7 @@ describe("PACT API", () => {
     expect(content.find((item) => item.id === "bulk-other-course")?.locked).toBe(false);
   });
 
-  it("scopes learner content to the launched content type", async () => {
+  it("does not hide unlocked learner content from other types during a typed launch", async () => {
     const db = await getMongoDb(config);
     await db.collection("test_pactUsers").updateOne(
       { id: "module-scoped-user" },
@@ -546,7 +546,7 @@ describe("PACT API", () => {
 
     const contentIds = response.body.map((item: { id: string }) => item.id);
     expect(contentIds).toContain("module-scoped-module");
-    expect(contentIds).not.toContain("module-scoped-challenge");
+    expect(contentIds).toContain("module-scoped-challenge");
   });
 
   it("does not content-type scope instructor review sessions", async () => {
@@ -953,6 +953,142 @@ describe("PACT API", () => {
     expect(JSON.stringify(auditResponse.body)).not.toContain("lms-admin-console-learner");
   });
 
+  it("carries learner-owned scores and progress when an admin reassigns squads", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactSquads").insertMany([
+      { id: "carry-squad-1", courseId: "pact-carry", cohortId: "cohort-carry", name: "Squad 1", number: "1", createdAt: now, updatedAt: now },
+      { id: "carry-squad-2", courseId: "pact-carry", cohortId: "cohort-carry", name: "Squad 2", number: "2", createdAt: now, updatedAt: now }
+    ]);
+    await db.collection("test_pactUsers").insertMany([
+      { id: "carry-admin", lmsUserId: "lms-carry-admin", role: "admin", courseId: "pact-carry", cohortId: "cohort-carry", createdAt: now, updatedAt: now },
+      {
+        id: "carry-learner",
+        lmsUserId: "lms-carry-learner",
+        name: "Elizabeth Sanders",
+        email: "elizabeth.sanders@example.test",
+        role: "learner",
+        courseId: "pact-carry",
+        cohortId: "cohort-carry",
+        squadId: "carry-squad-1",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactScores").insertOne({
+      id: "carry-score",
+      courseId: "pact-carry",
+      cohortId: "cohort-carry",
+      squadId: "carry-squad-1",
+      userId: "carry-learner",
+      contentId: "carry-module",
+      contentType: "module",
+      score: 8,
+      maxScore: 10,
+      progressPercent: 80,
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContentProgress").insertMany([
+      {
+        id: "carry-user-progress",
+        scope: "user",
+        courseId: "pact-carry",
+        cohortId: "cohort-carry",
+        squadId: "carry-squad-1",
+        userId: "carry-learner",
+        contentId: "carry-module",
+        contentType: "module",
+        answers: {},
+        answeredQuestionIds: [],
+        progressPercent: 80,
+        status: "submitted",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "carry-squad-progress",
+        scope: "squad",
+        courseId: "pact-carry",
+        cohortId: "cohort-carry",
+        squadId: "carry-squad-1",
+        userId: "squad:carry-squad-1",
+        updatedByUserId: "carry-learner",
+        contentId: "carry-workshop",
+        contentType: "workshop",
+        answers: {},
+        answeredQuestionIds: [],
+        progressPercent: 100,
+        status: "submitted",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactQuestionAttempts").insertOne({
+      id: "carry-attempt",
+      courseId: "pact-carry",
+      cohortId: "cohort-carry",
+      squadId: "carry-squad-1",
+      userId: "carry-learner",
+      contentId: "carry-module",
+      contentType: "module",
+      questionId: "carry-question",
+      attemptNumber: 1,
+      answer: "A",
+      score: 1,
+      maxScore: 1,
+      isCorrect: true,
+      feedbackExposed: true,
+      submittedAt: now
+    });
+    await db.collection("test_pactAgsPublishAttempts").insertOne({
+      id: "carry-ags",
+      courseId: "pact-carry",
+      cohortId: "cohort-carry",
+      squadId: "carry-squad-1",
+      userId: "carry-learner",
+      contentId: "carry-module",
+      contentType: "module",
+      status: "pending",
+      attemptCount: 0,
+      score: 8,
+      maxScore: 10,
+      progressPercent: 80,
+      nextAttemptAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
+    const adminToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "carry-admin",
+      role: "admin",
+      courseId: "pact-carry",
+      cohortId: "cohort-carry"
+    });
+
+    const response = await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/admin/users/carry-learner/squad")
+      .set("authorization", `Bearer ${adminToken}`)
+      .send({ squadNumber: "2" })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ squadId: "carry-squad-2" });
+    await expect(db.collection("test_pactScores").findOne({ id: "carry-score" })).resolves.toMatchObject({ squadId: "carry-squad-2" });
+    await expect(db.collection("test_pactContentProgress").findOne({ id: "carry-user-progress" })).resolves.toMatchObject({ squadId: "carry-squad-2" });
+    await expect(db.collection("test_pactQuestionAttempts").findOne({ id: "carry-attempt" })).resolves.toMatchObject({ squadId: "carry-squad-2" });
+    await expect(db.collection("test_pactAgsPublishAttempts").findOne({ id: "carry-ags" })).resolves.toMatchObject({ squadId: "carry-squad-2" });
+    await expect(db.collection("test_pactContentProgress").findOne({ id: "carry-squad-progress" })).resolves.toMatchObject({ squadId: "carry-squad-1" });
+    await expect(db.collection("test_pactAuditEvents").findOne({ targetUserId: "carry-learner", action: "squad.assignment.changed" })).resolves.toMatchObject({
+      metadata: {
+        previousSquadId: "carry-squad-1",
+        nextSquadId: "carry-squad-2",
+        carriedScores: 1,
+        carriedProgress: 1,
+        carriedQuestionAttempts: 1,
+        carriedAgsPublishAttempts: 1
+      }
+    });
+  });
+
   it("lets instructors use the course control plane without learner access", async () => {
     const db = await getMongoDb(config);
     const now = new Date().toISOString();
@@ -1268,6 +1404,7 @@ describe("PACT API", () => {
         .expect(200);
 
       expect(response.body).toMatchObject({ imported: 2, releases: 2 });
+      expect(response.body.content).toMatchObject({ status: "published", locked: false });
       expect(response.body.content.mechanics.releases).toEqual([
         expect.objectContaining({
           id: "release_R0",
@@ -1289,6 +1426,7 @@ describe("PACT API", () => {
 
       const persisted = await db.collection("test_pactContent").findOne({ id: "release-import-challenge" });
       expect(persisted?.mechanics).toMatchObject(response.body.content.mechanics);
+      expect(persisted).toMatchObject({ status: "published", locked: false });
     } finally {
       fetchMock.mockRestore();
     }
@@ -1426,6 +1564,99 @@ describe("PACT API", () => {
     } finally {
       fetchMock.mockRestore();
     }
+  });
+
+  it("publishes and unlocks a challenge when an instructor unlocks scenario releases", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertOne({
+      id: "release-unlock-learner",
+      lmsUserId: "lms-release-unlock-learner",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-release-unlock",
+      squadId: "release-unlock-squad",
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("release-unlock-challenge", "cohort-release-unlock", "learner", "draft", "challenge", true),
+      mechanics: {
+        kind: "challenge_path",
+        title: "Release Unlock Challenge",
+        prompt: "Review newly released scenario evidence.",
+        releases: [
+          {
+            id: "release_R0",
+            title: "Release R0",
+            summary: "Initial release.",
+            unlocked: false,
+            files: [{ key: "scenarios/release_R0/brief.txt", title: "Brief" }]
+          }
+        ],
+        paths: [{ id: "develop", label: "Develop", detail: "Build the case.", score: 100 }]
+      },
+      updatedAt: now
+    });
+
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "release-unlock-instructor",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-release-unlock"
+    });
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "release-unlock-learner",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-release-unlock",
+      squadId: "release-unlock-squad"
+    });
+
+    const mechanics = {
+      kind: "challenge_path",
+      title: "Release Unlock Challenge",
+      prompt: "Review newly released scenario evidence.",
+      releases: [
+        {
+          id: "release_R0",
+          title: "Release R0",
+          summary: "Initial release.",
+          unlocked: true,
+          files: [{ key: "scenarios/release_R0/brief.txt", title: "Brief" }]
+        }
+      ],
+      paths: [{ id: "develop", label: "Develop", detail: "Build the case.", score: 100 }]
+    };
+
+    const updateResponse = await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/admin/content/release-unlock-challenge/mechanics")
+      .set("authorization", `Bearer ${instructorToken}`)
+      .send({ mechanics })
+      .expect(200);
+
+    expect(updateResponse.body).toMatchObject({
+      id: "release-unlock-challenge",
+      status: "published",
+      locked: false,
+      mechanics: { releases: [expect.objectContaining({ id: "release_R0", unlocked: true })] }
+    });
+
+    const learnerResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content")
+      .set("authorization", `Bearer ${learnerToken}`)
+      .expect(200);
+
+    expect(learnerResponse.body).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "release-unlock-challenge",
+        status: "published",
+        locked: false,
+        mechanics: expect.objectContaining({
+          releases: expect.arrayContaining([expect.objectContaining({ id: "release_R0", unlocked: true })])
+        })
+      })
+    ]));
   });
 
   it("serves cohort agenda files to learners without admin document access", async () => {
@@ -3903,7 +4134,7 @@ describe("PACT API", () => {
     expect(session.contentType).toBeUndefined();
   });
 
-  it("scopes direct deep-linked assessment launches to the selected content", async () => {
+  it("keeps unlocked dashboard content visible during direct deep-linked assessment launches", async () => {
     const db = await getMongoDb(config);
     await db.collection("test_pactContent").updateOne(
       { id: "assessment-pretest" },
@@ -3913,6 +4144,11 @@ describe("PACT API", () => {
     await db.collection("test_pactContent").updateOne(
       { id: "assessment-posttest" },
       { $set: publishedContent("assessment-posttest", "cohort-launch", "learner", "published", "assessment") },
+      { upsert: true }
+    );
+    await db.collection("test_pactContent").updateOne(
+      { id: "workshop:day1-pm-squad-3-visible" },
+      { $set: publishedContent("workshop:day1-pm-squad-3-visible", "cohort-launch", "learner", "published", "workshop") },
       { upsert: true }
     );
     const idToken = await signResourceLaunch({
@@ -3938,7 +4174,11 @@ describe("PACT API", () => {
       .get("/api/v1/content")
       .set("authorization", `Bearer ${sessionToken}`)
       .expect(200);
-    expect(contentResponse.body.map((item: { id: string }) => item.id)).toEqual(["assessment-pretest"]);
+    expect(contentResponse.body.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining([
+      "assessment-pretest",
+      "assessment-posttest",
+      "workshop:day1-pm-squad-3-visible"
+    ]));
   });
 
   it("rejects resource launches that are missing required LTI claims before creating a session", async () => {
@@ -4078,6 +4318,40 @@ describe("PACT API", () => {
       .expect(200);
   });
 
+  it("clears the PACT session cookie on logout", async () => {
+    const idToken = await signResourceLaunch({ custom: { squad_id: "lms-squad-should-not-win" } });
+    const launchResponse = await request(createApp(config, createLogger(config)))
+      .post("/launch/module")
+      .set("accept", "text/html")
+      .type("form")
+      .send({ id_token: idToken })
+      .expect(303);
+    const sessionCookie = sessionCookieFromSetCookie(launchResponse.headers["set-cookie"]);
+    const sessionResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/session")
+      .set("cookie", sessionCookie)
+      .expect(200);
+
+    await request(createApp(config, createLogger(config)))
+      .delete("/api/v1/session")
+      .set("cookie", sessionCookie)
+      .send()
+      .expect(403);
+
+    const logoutResponse = await request(createApp(config, createLogger(config)))
+      .delete("/api/v1/session")
+      .set("cookie", sessionCookie)
+      .set("x-csrf-token", sessionResponse.body.csrfToken)
+      .send()
+      .expect(204);
+
+    const setCookie = logoutResponse.headers["set-cookie"];
+    const clearedCookie = (Array.isArray(setCookie) ? setCookie : [setCookie])
+      .find((item: string | undefined) => item?.startsWith(`${pactSessionCookieName}=`));
+    expect(clearedCookie).toContain("Max-Age=0");
+    expect(clearedCookie).toContain("HttpOnly");
+  });
+
   it("prefers explicit bearer sessions over stale PACT cookies", async () => {
     const db = await getMongoDb(config);
     const now = new Date().toISOString();
@@ -4174,6 +4448,11 @@ describe("PACT API", () => {
           title: "PACT Team Challenge Launch",
           url: "http://localhost:4100/launch/challenge",
           lineItem: expect.objectContaining({ label: "PACT Team Challenge Launch", resourceId: "pact-challenge-hub", tag: "challenge" })
+        }),
+        expect.objectContaining({
+          title: "PACT Workshops",
+          url: "http://localhost:4100/launch/workshop",
+          lineItem: expect.objectContaining({ label: "PACT Workshops", resourceId: "pact-workshop-hub", tag: "workshop" })
         }),
         expect.objectContaining({
           title: "PACT Pre-test",

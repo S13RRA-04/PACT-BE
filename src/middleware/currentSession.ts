@@ -60,6 +60,21 @@ export function sessionCookie(token: string, config: AppConfig) {
   return attributes.join("; ");
 }
 
+export function expiredSessionCookie(config: AppConfig) {
+  const attributes = [
+    `${pactSessionCookieName}=`,
+    "Path=/",
+    "HttpOnly",
+    "Max-Age=0"
+  ];
+  if (config.env === "production") {
+    attributes.push("SameSite=None", "Secure");
+  } else {
+    attributes.push("SameSite=Lax");
+  }
+  return attributes.join("; ");
+}
+
 function readBearer(header: string | undefined) {
   return header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : undefined;
 }

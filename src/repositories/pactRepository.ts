@@ -270,8 +270,10 @@ export class PactRepository {
     const user = await this.requireUser(userId);
     const squad = await this.squads().findOne({ id: squadId, courseId: user.courseId, cohortId: user.cohortId });
     if (!squad) throw new AppError(400, "INVALID_SQUAD_ASSIGNMENT", "Squad does not belong to the user's course and cohort");
-    await this.users().updateOne({ id: userId }, { $set: { squadId, updatedAt: new Date().toISOString() } });
-    return { ...user, squadId, updatedAt: new Date().toISOString() };
+    const updatedAt = new Date().toISOString();
+    await this.users().updateOne({ id: userId }, { $set: { squadId, updatedAt } });
+    await this.carryLearnerSquadHistory({ user, nextSquadId: squadId, updatedAt });
+    return { ...user, squadId, updatedAt };
   }
 
   async assignSquadForAdmin(userId: string, input: { squadId?: string; squadNumber?: SquadNumber; session: { userId: string; role: PactRole; courseId: string; cohortId: string } }) {
@@ -290,6 +292,7 @@ export class PactRepository {
 
     const updatedAt = new Date().toISOString();
     await this.users().updateOne({ id: userId }, { $set: { squadId: squad.id, updatedAt } });
+    const carried = await this.carryLearnerSquadHistory({ user, nextSquadId: squad.id, updatedAt });
     await this.auditEvents().insertOne({
       id: crypto.randomUUID(),
       action: "squad.assignment.changed",
@@ -300,7 +303,11 @@ export class PactRepository {
       metadata: {
         previousSquadId: user.squadId,
         nextSquadId: squad.id,
-        nextSquadNumber: squad.number ?? squadNumberFromName(squad.name)
+        nextSquadNumber: squad.number ?? squadNumberFromName(squad.name),
+        carriedScores: carried.scores,
+        carriedProgress: carried.progress,
+        carriedQuestionAttempts: carried.questionAttempts,
+        carriedAgsPublishAttempts: carried.agsPublishAttempts
       },
       createdAt: updatedAt
     });
@@ -335,6 +342,34 @@ export class PactRepository {
     return squad;
   }
 
+  private async carryLearnerSquadHistory(input: { user: PactUser; nextSquadId: string; updatedAt: string }) {
+    if (input.user.squadId === input.nextSquadId) {
+      return { scores: 0, progress: 0, questionAttempts: 0, agsPublishAttempts: 0 };
+    }
+    const baseFilter = {
+      userId: input.user.id,
+      courseId: input.user.courseId,
+      cohortId: input.user.cohortId
+    };
+    const progressFilter = {
+      ...baseFilter,
+      $or: [{ scope: "user" as const }, { scope: { $exists: false } }]
+    };
+    const [scores, progress, questionAttempts, agsPublishAttempts] = await Promise.all([
+      this.scores().updateMany(baseFilter, { $set: { squadId: input.nextSquadId, updatedAt: input.updatedAt } }),
+      this.contentProgress().updateMany(progressFilter, { $set: { squadId: input.nextSquadId, updatedAt: input.updatedAt } }),
+      this.questionAttempts().updateMany(baseFilter, { $set: { squadId: input.nextSquadId } }),
+      this.agsPublishAttempts().updateMany(baseFilter, { $set: { squadId: input.nextSquadId, updatedAt: input.updatedAt } })
+    ]);
+
+    return {
+      scores: scores.modifiedCount,
+      progress: progress.modifiedCount,
+      questionAttempts: questionAttempts.modifiedCount,
+      agsPublishAttempts: agsPublishAttempts.modifiedCount
+    };
+  }
+
   async upsertContent(input: Omit<PactContent, "id" | "createdAt" | "updatedAt"> & { id?: string }) {
     const now = new Date().toISOString();
     const id = input.id ?? crypto.randomUUID();
@@ -359,10 +394,9 @@ export class PactRepository {
   }
 
   async listContentFor(user: PactUser, contentType?: ContentType, contentId?: string) {
-    const idFilter = contentId ? { id: contentId } : {};
     if (user.role === "admin") {
       const content = await this.content()
-        .find({ courseId: user.courseId, ...idFilter })
+        .find({ courseId: user.courseId })
         .sort({ type: 1, title: 1 })
         .toArray();
       return content.map(normalizeContentDefaults);
@@ -370,18 +404,15 @@ export class PactRepository {
 
     if (user.role === "instructor") {
       const content = await this.content()
-        .find({ courseId: user.courseId, ...idFilter })
+        .find({ courseId: user.courseId })
         .sort({ type: 1, title: 1 })
         .toArray();
       return content.map(normalizeContentDefaults);
     }
 
-    const typeFilter = contentType ? { type: contentType } : {};
     const content = await this.content()
       .find({
         courseId: user.courseId,
-        ...idFilter,
-        ...typeFilter,
         status: "published",
         locked: false,
         role: { $in: [user.role, "all"] },
@@ -502,13 +533,13 @@ export class PactRepository {
         },
         {
           code: "launch_type",
-          label: !session.contentType || item.type === session.contentType ? "Matches launch type" : `Launch is ${session.contentType}`,
-          passed: !session.contentType || item.type === session.contentType
+          label: session.contentType ? `Launch type ${session.contentType} does not restrict dashboard content` : "No launch type restriction",
+          passed: true
         },
         {
           code: "launch_content",
-          label: !session.contentId || item.id === session.contentId ? "Matches launch content" : `Launch content is ${session.contentId}`,
-          passed: !session.contentId || item.id === session.contentId
+          label: session.contentId ? `Launch content ${session.contentId} does not restrict dashboard content` : "No launch content restriction",
+          passed: true
         }
       ];
 
@@ -636,11 +667,14 @@ export class PactRepository {
       throw new AppError(400, "MECHANICS_TYPE_MISMATCH", "Mechanics kind does not match content type");
     }
     const updatedAt = new Date().toISOString();
+    const availability = mechanicsUnlocksChallenge(input.mechanics)
+      ? { status: "published" as const, locked: false }
+      : {};
     const update = input.mechanics
-      ? { $set: { mechanics: input.mechanics, updatedAt } }
+      ? { $set: { mechanics: input.mechanics, updatedAt, ...availability } }
       : { $unset: { mechanics: 1 as const }, $set: { updatedAt } };
     await this.content().updateOne({ id: input.contentId }, update);
-    return input.mechanics ? { ...content, mechanics: input.mechanics, updatedAt } : { ...content, mechanics: undefined, updatedAt };
+    return input.mechanics ? { ...content, mechanics: input.mechanics, updatedAt, ...availability } : { ...content, mechanics: undefined, updatedAt };
   }
 
   async importContentReleaseMechanics(input: { contentId: string; mechanics: ContentMechanics; session: { role: PactRole; courseId: string; cohortId: string } }) {
@@ -652,11 +686,14 @@ export class PactRepository {
       throw new AppError(400, "MECHANICS_TYPE_MISMATCH", "Release imports are only supported for challenge content");
     }
     const updatedAt = new Date().toISOString();
+    const availability = mechanicsUnlocksChallenge(input.mechanics)
+      ? { status: "published" as const, locked: false }
+      : {};
     await this.content().updateOne(
       { id: input.contentId, courseId: input.session.courseId, type: "challenge" },
-      { $set: { mechanics: input.mechanics, updatedAt } }
+      { $set: { mechanics: input.mechanics, updatedAt, ...availability } }
     );
-    return { ...content, mechanics: input.mechanics, updatedAt };
+    return { ...content, mechanics: input.mechanics, updatedAt, ...availability };
   }
 
   async upsertScore(input: {
@@ -1479,6 +1516,10 @@ function normalizeContentDefaults(content: PactContent): PactContent {
     ...content,
     locked: content.locked ?? true
   };
+}
+
+function mechanicsUnlocksChallenge(mechanics: ContentMechanics | null) {
+  return mechanics?.kind === "challenge_path" && (mechanics.releases ?? []).some((release) => release.unlocked);
 }
 
 function squadNumberFromName(name: string): SquadNumber | undefined {

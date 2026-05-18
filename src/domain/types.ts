@@ -361,6 +361,10 @@ export type PactAuditEvent = {
     previousSquadId?: string;
     nextSquadId?: string;
     nextSquadNumber?: SquadNumber;
+    carriedScores?: number;
+    carriedProgress?: number;
+    carriedQuestionAttempts?: number;
+    carriedAgsPublishAttempts?: number;
     contentId?: string;
     questionId?: string;
     attemptId?: string;

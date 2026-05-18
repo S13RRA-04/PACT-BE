@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import type { AppConfig } from "../config/config.js";
 import { getMongoDb } from "../db/mongo.js";
-import { currentSession, requireCsrfForCookieSession, requirePactRole, sessionCookie } from "../middleware/currentSession.js";
+import { currentSession, expiredSessionCookie, requireCsrfForCookieSession, requirePactRole, sessionCookie } from "../middleware/currentSession.js";
 import { LmsAgsClient } from "../integrations/lmsAgsClient.js";
 import { LmsTokenClient } from "../integrations/lmsTokenClient.js";
 import { PactRepository } from "../repositories/pactRepository.js";
@@ -177,6 +177,15 @@ export function createApiRouter(config: AppConfig) {
   router.get("/session", async (req, res, next) => {
     try {
       res.status(200).json(await pactService(config).then((service) => service.getSession(requireSession(req))));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.delete("/session", async (_req, res, next) => {
+    try {
+      res.setHeader("set-cookie", expiredSessionCookie(config));
+      res.status(204).send();
     } catch (error) {
       next(error);
     }

@@ -42,6 +42,7 @@ export class DeepLinkingService {
     const contentItems = [
       contentItem("pact-module-hub", labels.module ?? "PACT Modules", `${this.config.appBaseUrl}/launch/module`, 100, "module"),
       contentItem("pact-challenge-hub", labels.challenge ?? "PACT Challenges", `${this.config.appBaseUrl}/launch/challenge`, 100, "challenge"),
+      contentItem("pact-workshop-hub", labels.workshop ?? "PACT Workshops", `${this.config.appBaseUrl}/launch/workshop`, 100, "workshop"),
       contentItem("pact-game-hub", labels.game ?? "PACT Games", `${this.config.appBaseUrl}/launch/game`, 100, "game"),
       contentItem("pact-assessment-hub", labels.assessment ?? "PACT Assessments", `${this.config.appBaseUrl}/launch/assessment`, 100, "assessment"),
       ...directAssessmentItems
