@@ -24,6 +24,10 @@ function sha256Hex(data: string): string {
   return createHash("sha256").update(data, "utf8").digest("hex");
 }
 
+function sha256BytesHex(data: Uint8Array): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
 function hmac(key: Buffer | string, data: string): Buffer {
   return createHmac("sha256", key).update(data, "utf8").digest();
 }
@@ -105,6 +109,53 @@ export async function listR2Documents(config: R2Config, prefix?: string): Promis
     ...item,
     downloadUrl: presignR2GetObject(config, item.key, { expiresIn: 3600, now })
   }));
+}
+
+export async function putR2Object(config: R2Config, input: {
+  key: string;
+  body: Uint8Array;
+  contentType?: string;
+}) {
+  const host = r2Host(config);
+  const now = new Date();
+  const date = isoDate(now);
+  const datetime = isoDateTime(now);
+  const normalizedKey = normalizeR2ObjectKey(config, input.key);
+  const payloadHash = sha256BytesHex(input.body);
+  const encodedKey = normalizedKey.split("/").map(sigV4Encode).join("/");
+  const path = `/${config.bucketName}/${encodedKey}`;
+  const contentType = input.contentType ?? "application/octet-stream";
+
+  const canonicalHeaders = `content-type:${contentType}\nhost:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${datetime}\n`;
+  const signedHeaders = "content-type;host;x-amz-content-sha256;x-amz-date";
+  const canonicalRequest = ["PUT", path, "", canonicalHeaders, signedHeaders, payloadHash].join("\n");
+  const credScope = `${date}/${REGION}/${SERVICE}/aws4_request`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${datetime}\n${credScope}\n${sha256Hex(canonicalRequest)}`;
+  const key = signingKey(config.secretAccessKey, date);
+  const signature = hmacHex(key, stringToSign);
+  const authorization = `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${credScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const response = await fetch(`https://${host}${path}`, {
+    method: "PUT",
+    headers: {
+      "content-type": contentType,
+      "host": host,
+      "x-amz-content-sha256": payloadHash,
+      "x-amz-date": datetime,
+      "authorization": authorization
+    },
+    body: Buffer.from(input.body)
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`R2 put failed: ${response.status} ${body.slice(0, 200)}`);
+  }
+
+  return {
+    key: normalizedKey,
+    etag: response.headers.get("etag") ?? undefined
+  };
 }
 
 export function presignR2GetObject(config: R2Config, key: string, options: {

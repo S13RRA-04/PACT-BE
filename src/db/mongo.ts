@@ -4,6 +4,10 @@ import type { AppConfig } from "../config/config.js";
 const clients = new Map<string, Promise<MongoClient>>();
 
 export async function getMongoDb(config: AppConfig): Promise<Db> {
+  return getMongoDatabase(config, config.mongoDbName);
+}
+
+export async function getMongoDatabase(config: AppConfig, databaseName: string): Promise<Db> {
   const key = mongoClientKey(config);
   let clientPromise = clients.get(key);
 
@@ -13,7 +17,7 @@ export async function getMongoDb(config: AppConfig): Promise<Db> {
   }
 
   const client = await clientPromise;
-  return client.db(config.mongoDbName);
+  return client.db(databaseName);
 }
 
 export async function closeMongoClient() {

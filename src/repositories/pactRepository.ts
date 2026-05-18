@@ -140,6 +140,75 @@ export class PactRepository {
     }));
   }
 
+  async listChallengeSubmissionsForReview(input: { contentId: string; session: { role: PactRole; courseId: string; cohortId: string } }) {
+    const content = await this.content().findOne({ id: input.contentId, courseId: input.session.courseId });
+    if (!content) throw new AppError(404, "CONTENT_NOT_FOUND", "Content was not found");
+    if (content.type !== "challenge" || content.mechanics?.kind !== "challenge_path") {
+      throw new AppError(400, "CONTENT_NOT_REVIEWABLE", "Only challenge-path content has synthesis submissions");
+    }
+
+    const cohortFilter = content.cohortId ? { cohortId: content.cohortId } : {};
+    const [users, squads, progress] = await Promise.all([
+      this.users()
+        .find({ courseId: input.session.courseId, role: "learner", ...cohortFilter })
+        .sort({ cohortId: 1, name: 1, email: 1 })
+        .toArray(),
+      this.squads().find({ courseId: input.session.courseId }).toArray(),
+      this.contentProgress().find({ courseId: input.session.courseId, contentId: input.contentId }).toArray()
+    ]);
+    const progressByUserId = new Map(progress.map((item) => [item.userId, item]));
+    const prompts = content.mechanics.synthesisPrompts ?? [];
+    const submissions = users.map((user) => {
+      const userProgress = progressByUserId.get(user.id);
+      const synthesisResponses = synthesisResponsesFromState(userProgress?.mechanicsState);
+      const completedPromptIds = prompts
+        .filter((prompt) => (synthesisResponses[prompt.id] ?? "").trim().length > 0)
+        .map((prompt) => prompt.id);
+
+      return {
+        userId: user.id,
+        lmsUserId: user.lmsUserId,
+        learnerName: user.name ?? user.email ?? user.id,
+        email: user.email,
+        cohortId: user.cohortId,
+        squadId: user.squadId,
+        squadNumber: squadNumberForUser(user, squads),
+        status: userProgress?.status ?? "not_started",
+        progressPercent: userProgress?.progressPercent ?? 0,
+        completedPromptIds,
+        responses: prompts.map((prompt) => ({
+          promptId: prompt.id,
+          label: prompt.label,
+          prompt: prompt.prompt,
+          required: prompt.required !== false,
+          response: synthesisResponses[prompt.id] ?? ""
+        })),
+        updatedAt: userProgress?.updatedAt,
+        submittedAt: userProgress?.submittedAt
+      };
+    });
+
+    const squadKeys = Array.from(new Set(submissions.map((submission) => submission.squadNumber ?? submission.squadId ?? "unassigned"))).sort();
+    return {
+      content: {
+        id: content.id,
+        title: content.title,
+        cohortId: content.cohortId ?? null
+      },
+      prompts: prompts.map((prompt) => ({
+        id: prompt.id,
+        label: prompt.label,
+        prompt: prompt.prompt,
+        required: prompt.required !== false
+      })),
+      squads: squadKeys.map((key) => ({
+        key,
+        label: key === "unassigned" ? "Unassigned" : `Squad ${key}`,
+        submissions: submissions.filter((submission) => (submission.squadNumber ?? submission.squadId ?? "unassigned") === key)
+      }))
+    };
+  }
+
   async listAdminAuditEvents(input: {
     session: { courseId: string };
     action?: PactAuditEvent["action"];
@@ -1284,6 +1353,15 @@ function startedAtFromMechanicsState(mechanicsState: PactMechanicsState | undefi
   const startedAt = mechanicsState.startedAt;
   if (typeof startedAt !== "string") return undefined;
   return Number.isFinite(Date.parse(startedAt)) ? startedAt : undefined;
+}
+
+function synthesisResponsesFromState(mechanicsState: PactMechanicsState | undefined): Record<string, string> {
+  const value = mechanicsState?.synthesisResponses;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
 }
 
 function mechanicsMatchesContentType(type: ContentType, kind: ContentMechanics["kind"]) {

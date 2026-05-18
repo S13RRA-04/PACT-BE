@@ -17,6 +17,7 @@ import { listR2Documents } from "../services/r2Service.js";
 import { BugReportService } from "../services/bugReportService.js";
 import { ReleaseImportService } from "../services/releaseImportService.js";
 import { DeckImportService } from "../services/deckImportService.js";
+import { LmsRosterSyncService } from "../services/lmsRosterSyncService.js";
 
 export function createApiRouter(config: AppConfig) {
   const router = Router();
@@ -176,6 +177,7 @@ export function createApiRouter(config: AppConfig) {
   router.get("/admin/cohorts", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);
+      await new LmsRosterSyncService(config, repository).syncCourseRoster(requireSession(req).courseId);
       res.status(200).json({ cohorts: await repository.listAdminCohorts(requireSession(req)) });
     } catch (error) {
       next(error);
@@ -202,6 +204,18 @@ export function createApiRouter(config: AppConfig) {
       res.status(200).json(await repository.assignSquadForAdmin(req.params.userId, {
         squadId: input.squadId,
         squadNumber: input.squadNumber,
+        session: requireSession(req)
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/content/:contentId/submissions", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json(await repository.listChallengeSubmissionsForReview({
+        contentId: req.params.contentId,
         session: requireSession(req)
       }));
     } catch (error) {

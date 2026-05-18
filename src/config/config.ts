@@ -15,6 +15,9 @@ const envSchema = z.object({
   LMS_PLATFORM_ISSUER: z.string().url(),
   LMS_PLATFORM_JWKS_URI: z.string().url(),
   LMS_DEEP_LINK_RETURN_URL: z.string().url(),
+  LMS_MONGO_DB_NAME: z.string().min(1).optional(),
+  LMS_MONGODB_DB: z.string().min(1).optional(),
+  LMS_MONGO_COLLECTION_PREFIX: z.string().optional(),
   PACT_WEB_BASE_URL: z.string().url().optional(),
   PACT_LTI_CLIENT_ID: z.string().min(1),
   PACT_LTI_DEPLOYMENT_IDS: z.string().min(1),
@@ -62,6 +65,8 @@ export type AppConfig = {
   lmsPlatformIssuer: string;
   lmsPlatformJwksUri: string;
   lmsDeepLinkReturnUrl: string;
+  lmsMongoDbName: string;
+  lmsMongoCollectionPrefix: string;
   pactWebBaseUrl: string;
   pactLtiClientId: string;
   pactLtiDeploymentIds: string[];
@@ -128,6 +133,8 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     lmsPlatformIssuer: parsed.LMS_PLATFORM_ISSUER.replace(/\/$/, ""),
     lmsPlatformJwksUri: parsed.LMS_PLATFORM_JWKS_URI,
     lmsDeepLinkReturnUrl: parsed.LMS_DEEP_LINK_RETURN_URL,
+    lmsMongoDbName: parsed.LMS_MONGODB_DB ?? parsed.LMS_MONGO_DB_NAME ?? "LMS",
+    lmsMongoCollectionPrefix: parsed.LMS_MONGO_COLLECTION_PREFIX ?? "",
     pactWebBaseUrl: (parsed.PACT_WEB_BASE_URL ?? parsed.APP_BASE_URL).replace(/\/$/, ""),
     pactLtiClientId: parsed.PACT_LTI_CLIENT_ID,
     pactLtiDeploymentIds: parsed.PACT_LTI_DEPLOYMENT_IDS.split(",").map((value) => value.trim()).filter(Boolean),

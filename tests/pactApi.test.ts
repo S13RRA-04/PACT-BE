@@ -1,6 +1,7 @@
 import http from "node:http";
 import { createHmac } from "node:crypto";
 import { exportJWK, exportPKCS8, generateKeyPair, SignJWT, type KeyLike } from "jose";
+import { MongoClient } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -47,6 +48,8 @@ beforeAll(async () => {
     lmsPlatformIssuer: "http://lms.example.test",
     lmsPlatformJwksUri: `http://127.0.0.1:${address.port}/jwks`,
     lmsDeepLinkReturnUrl: "http://lms.example.test/api/v1/lti/deep-linking/return",
+    lmsMongoDbName: "LMS_TEST",
+    lmsMongoCollectionPrefix: "lms_test_",
     pactLtiClientId: "pact-tool",
     pactLtiDeploymentIds: ["deployment-1"],
     pactSessionSecret: "test-secret-with-enough-length",
@@ -314,6 +317,157 @@ describe("PACT API", () => {
       .set("authorization", `Bearer ${learnerToken}`)
       .send({ progressPercent: 25 })
       .expect(200);
+  });
+
+  it("syncs active LMS enrollments into PACT admin cohorts before learners launch", async () => {
+    const pactDb = await getMongoDb(config);
+    const mongoClient = await new MongoClient(config.mongoUri).connect();
+    const externalLmsDb = mongoClient.db(config.lmsMongoDbName);
+    const now = new Date().toISOString();
+
+    await pactDb.collection("test_pactUsers").updateOne(
+      { id: "roster-admin" },
+      {
+        $set: {
+          id: "roster-admin",
+          lmsUserId: "lms-roster-admin",
+          role: "admin",
+          courseId: "pact-roster",
+          cohortId: "cohort-roster",
+          createdAt: now,
+          updatedAt: now
+        }
+      },
+      { upsert: true }
+    );
+    await externalLmsDb.collection("lms_test_users").insertMany([
+      { id: "lms-learner-a", email: "learner-a@example.test", name: "Learner A", role: "learner", enabled: true, createdAt: now, updatedAt: now },
+      { id: "lms-learner-b", email: "learner-b@example.test", name: "Learner B", role: "learner", enabled: true, createdAt: now, updatedAt: now },
+      { id: "disabled-learner", email: "disabled@example.test", name: "Disabled", role: "learner", enabled: false, createdAt: now, updatedAt: now }
+    ]);
+    await externalLmsDb.collection("lms_test_enrollments").insertMany([
+      { id: "enrollment-a", userId: "lms-learner-a", courseId: "pact-roster", cohortId: "cohort-roster", status: "not_started", enrolledAt: now },
+      { id: "enrollment-b", userId: "lms-learner-b", courseId: "pact-roster", cohortId: "cohort-roster", status: "in_progress", enrolledAt: now },
+      { id: "enrollment-disabled", userId: "disabled-learner", courseId: "pact-roster", cohortId: "cohort-roster", status: "not_started", enrolledAt: now },
+      { id: "enrollment-expired", userId: "lms-expired", courseId: "pact-roster", cohortId: "cohort-roster", status: "expired", enrolledAt: now }
+    ]);
+
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "roster-admin",
+      role: "admin",
+      courseId: "pact-roster",
+      cohortId: "cohort-roster"
+    });
+
+    const response = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/cohorts")
+      .set("authorization", `Bearer ${token}`)
+      .expect(200);
+
+    const cohort = response.body.cohorts.find((item: { cohortId: string }) => item.cohortId === "cohort-roster");
+    expect(cohort.users.map((user: { email?: string }) => user.email)).toEqual(expect.arrayContaining([
+      "learner-a@example.test",
+      "learner-b@example.test"
+    ]));
+    expect(cohort.users.map((user: { email?: string }) => user.email)).not.toContain("disabled@example.test");
+
+    await mongoClient.close();
+  });
+
+  it("returns challenge synthesis submissions grouped by squad for instructors", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "submission-instructor",
+        lmsUserId: "lms-submission-instructor",
+        role: "instructor",
+        courseId: "pact-submissions",
+        cohortId: "cohort-submissions",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "submission-learner",
+        lmsUserId: "lms-submission-learner",
+        email: "learner@example.test",
+        name: "Submission Learner",
+        role: "learner",
+        courseId: "pact-submissions",
+        cohortId: "cohort-submissions",
+        squadId: "submission-squad-1",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactSquads").insertOne({
+      id: "submission-squad-1",
+      courseId: "pact-submissions",
+      cohortId: "cohort-submissions",
+      name: "Squad 1",
+      number: "1",
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("workshop-submissions", "cohort-submissions", "learner", "published", "challenge", false),
+      courseId: "pact-submissions",
+      mechanics: {
+        kind: "challenge_path",
+        title: "Workshop",
+        prompt: "Capture synthesis.",
+        synthesisPrompts: [
+          { id: "agent", label: "Agent response", prompt: "Agent prompt" },
+          { id: "analyst", label: "Analyst response", prompt: "Analyst prompt" }
+        ],
+        paths: [{ id: "complete", label: "Complete", detail: "Complete prompts.", score: 100 }]
+      }
+    });
+    await db.collection("test_pactContentProgress").insertOne({
+      id: "submission-progress",
+      courseId: "pact-submissions",
+      cohortId: "cohort-submissions",
+      squadId: "submission-squad-1",
+      userId: "submission-learner",
+      contentId: "workshop-submissions",
+      contentType: "challenge",
+      answers: {},
+      mechanicsState: {
+        kind: "challenge_path",
+        synthesisResponses: {
+          agent: "Agent response text"
+        }
+      },
+      answeredQuestionIds: [],
+      progressPercent: 50,
+      status: "in_progress",
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "submission-instructor",
+      role: "instructor",
+      courseId: "pact-submissions",
+      cohortId: "cohort-submissions"
+    });
+
+    const response = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/content/workshop-submissions/submissions")
+      .set("authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body.content).toMatchObject({ id: "workshop-submissions", title: "workshop-submissions" });
+    expect(response.body.squads[0]).toMatchObject({ key: "1", label: "Squad 1" });
+    expect(response.body.squads[0].submissions[0]).toMatchObject({
+      learnerName: "Submission Learner",
+      completedPromptIds: ["agent"],
+      progressPercent: 50
+    });
+    expect(response.body.squads[0].submissions[0].responses[0]).toMatchObject({
+      promptId: "agent",
+      response: "Agent response text"
+    });
   });
 
   it("locks all published course content for a one-time admin reset", async () => {
