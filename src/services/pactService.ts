@@ -29,6 +29,28 @@ export class PactService {
     return this.repository.listProgressForUser(user, content.map((item) => item.id));
   }
 
+  async getSquadContentProgress(session: PactSession) {
+    const user = await this.repository.requireUser(session.userId);
+    if (!user.squadId) {
+      throw new AppError(409, "SQUAD_REQUIRED", "A squad assignment is required for squad progress");
+    }
+    const content = await this.repository.listContentFor(user, session.contentType, session.contentId);
+    const squadContent = content.filter((item) => isSquadCompletionContent(item));
+    return this.repository.listProgressForSquad(user, squadContent.map((item) => item.id));
+  }
+
+  async getSquadContentProgressForContent(session: PactSession, contentId: string) {
+    const user = await this.repository.requireUser(session.userId);
+    const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
+    this.requireSquadContentAccess(user, content);
+    const progress = await this.repository.listProgressForSquad(user, [content.id]);
+    return {
+      contentId: content.id,
+      squadId: user.squadId,
+      progress: progress[0] ?? null
+    };
+  }
+
   async getContentCompletionStatus(session: PactSession, contentId: string) {
     const user = await this.repository.requireUser(session.userId);
     const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
@@ -301,6 +323,34 @@ export class PactService {
     return score;
   }
 
+  async submitSquadScore(session: PactSession, contentId: string, input: { score: number; maxScore?: number; progressPercent: number }) {
+    const user = await this.repository.requireUser(session.userId);
+    const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
+    this.requireSquadContentAccess(user, content);
+
+    if (input.score > (input.maxScore ?? content.maxScore)) {
+      throw new AppError(400, "INVALID_SCORE", "Score cannot exceed max score");
+    }
+
+    const maxScore = input.maxScore ?? content.maxScore;
+    const assignmentComplete = input.progressPercent >= 100;
+    const submittedAt = new Date().toISOString();
+    const progress = await this.repository.upsertSquadContentProgress({
+      user,
+      content,
+      progressPercent: input.progressPercent,
+      status: assignmentComplete ? "submitted" : "in_progress",
+      submittedAt: assignmentComplete ? submittedAt : undefined,
+      score: input.score,
+      maxScore
+    });
+
+    return {
+      ...progress,
+      agsStatus: "not_applicable" as const
+    };
+  }
+
   async updateContentProgress(session: PactSession, contentId: string, input: {
     answers?: Record<string, PactAnswerValue>;
     mechanicsState?: PactMechanicsState;
@@ -316,6 +366,26 @@ export class PactService {
     }
     const answers = input.answers ? filterAnswersForContent(content, input.answers) : undefined;
     return this.repository.upsertContentProgress({
+      user,
+      content,
+      answers,
+      mechanicsState: input.mechanicsState,
+      progressPercent: input.progressPercent,
+      status: input.status
+    });
+  }
+
+  async updateSquadContentProgress(session: PactSession, contentId: string, input: {
+    answers?: Record<string, PactAnswerValue>;
+    mechanicsState?: PactMechanicsState;
+    progressPercent?: number;
+    status?: "not_started" | "in_progress" | "submitted";
+  }) {
+    const user = await this.repository.requireUser(session.userId);
+    const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
+    this.requireSquadContentAccess(user, content);
+    const answers = input.answers ? filterAnswersForContent(content, input.answers) : undefined;
+    return this.repository.upsertSquadContentProgress({
       user,
       content,
       answers,
@@ -392,6 +462,16 @@ export class PactService {
 
     if (user.role === "learner" && content.locked !== false) {
       throw new AppError(403, "CONTENT_LOCKED", "Content is locked by the instructor");
+    }
+  }
+
+  private requireSquadContentAccess(user: PactUser, content: PactContent) {
+    this.requireLearnerContentAccess(user, content);
+    if (!isSquadCompletionContent(content)) {
+      throw new AppError(400, "SQUAD_PROGRESS_UNSUPPORTED", "Squad progress is only supported for challenges and workshops");
+    }
+    if (!user.squadId) {
+      throw new AppError(409, "SQUAD_REQUIRED", "A squad assignment is required for squad progress");
     }
   }
 
@@ -774,6 +854,10 @@ export class PactService {
 
 function isFullCreditManualGrade(score: number, maxScore: number) {
   return score >= maxScore;
+}
+
+function isSquadCompletionContent(content: PactContent) {
+  return content.type === "challenge" || content.type === "workshop";
 }
 
 function filterAnswersForContent(content: PactContent, answers: Record<string, PactAnswerValue>) {

@@ -196,7 +196,7 @@ export class LtiLaunchService {
     }
 
     return target.pathname === "/launch"
-      || /^\/launch\/(module|challenge|game|assessment)$/.test(target.pathname)
+      || /^\/launch\/(module|challenge|workshop|game|assessment)$/.test(target.pathname)
       || target.pathname === "/api/v1/lti/launch"
       || (this.config.pactAllowLegacyLtiPaths && target.pathname === "/lti/launch");
   }
@@ -206,7 +206,7 @@ function launchScopeFromTargetLink(value: string | undefined): { contentType?: C
   if (!value) return {};
   try {
     const target = new URL(value);
-    const contentType = target.pathname.match(/^\/launch\/(module|challenge|game|assessment)$/)?.[1] as ContentType | undefined;
+    const contentType = target.pathname.match(/^\/launch\/(module|challenge|workshop|game|assessment)$/)?.[1] as ContentType | undefined;
     return {
       contentType,
       contentId: target.searchParams.get("contentId") ?? undefined

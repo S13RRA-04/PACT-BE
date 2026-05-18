@@ -19,6 +19,16 @@ describe("content mechanics schema", () => {
     expect(parsed.locked).toBe(true);
   });
 
+  it("accepts workshop content without mechanics", () => {
+    const parsed = contentCreateSchema.parse({
+      ...baseContent,
+      type: "workshop"
+    });
+
+    expect(parsed.type).toBe("workshop");
+    expect(parsed.mechanics).toBeUndefined();
+  });
+
   it("accepts backend-driven game mechanics", () => {
     const parsed = contentCreateSchema.parse({
       ...baseContent,

@@ -156,11 +156,14 @@ export class PactRepository {
       this.squads().find({ courseId: input.session.courseId }).toArray(),
       this.contentProgress().find({ courseId: input.session.courseId, contentId: input.contentId }).toArray()
     ]);
-    const progressByUserId = new Map(progress.map((item) => [item.userId, item]));
+    const userProgress = progress.filter((item) => item.scope === "user" || !item.scope);
+    const squadProgress = progress.filter((item) => item.scope === "squad" && item.squadId);
+    const progressByUserId = new Map(userProgress.map((item) => [item.userId, item]));
+    const progressBySquadId = new Map(squadProgress.map((item) => [item.squadId, item]));
     const prompts = content.mechanics.synthesisPrompts ?? [];
     const submissions = users.map((user) => {
-      const userProgress = progressByUserId.get(user.id);
-      const synthesisResponses = synthesisResponsesFromState(userProgress?.mechanicsState);
+      const progressRecord = progressBySquadId.get(user.squadId ?? "") ?? progressByUserId.get(user.id);
+      const synthesisResponses = synthesisResponsesFromState(progressRecord?.mechanicsState);
       const completedPromptIds = prompts
         .filter((prompt) => (synthesisResponses[prompt.id] ?? "").trim().length > 0)
         .map((prompt) => prompt.id);
@@ -173,8 +176,8 @@ export class PactRepository {
         cohortId: user.cohortId,
         squadId: user.squadId,
         squadNumber: squadNumberForUser(user, squads),
-        status: userProgress?.status ?? "not_started",
-        progressPercent: userProgress?.progressPercent ?? 0,
+        status: progressRecord?.status ?? "not_started",
+        progressPercent: progressRecord?.progressPercent ?? 0,
         completedPromptIds,
         responses: prompts.map((prompt) => ({
           promptId: prompt.id,
@@ -183,8 +186,8 @@ export class PactRepository {
           required: prompt.required !== false,
           response: synthesisResponses[prompt.id] ?? ""
         })),
-        updatedAt: userProgress?.updatedAt,
-        submittedAt: userProgress?.submittedAt
+        updatedAt: progressRecord?.updatedAt,
+        submittedAt: progressRecord?.submittedAt
       };
     });
 
@@ -949,7 +952,27 @@ export class PactRepository {
   async listProgressForUser(user: PactUser, contentIds: string[]) {
     if (!contentIds.length) return [];
     return this.contentProgress()
-      .find({ userId: user.id, courseId: user.courseId, cohortId: user.cohortId, contentId: { $in: contentIds } })
+      .find({
+        userId: user.id,
+        courseId: user.courseId,
+        cohortId: user.cohortId,
+        contentId: { $in: contentIds },
+        $or: [{ scope: "user" }, { scope: { $exists: false } }]
+      })
+      .sort({ updatedAt: -1 })
+      .toArray();
+  }
+
+  async listProgressForSquad(user: PactUser, contentIds: string[]) {
+    if (!contentIds.length || !user.squadId) return [];
+    return this.contentProgress()
+      .find({
+        scope: "squad",
+        courseId: user.courseId,
+        cohortId: user.cohortId,
+        squadId: user.squadId,
+        contentId: { $in: contentIds }
+      })
       .sort({ updatedAt: -1 })
       .toArray();
   }
@@ -975,6 +998,7 @@ export class PactRepository {
     const status = input.status ?? (progressPercent > 0 ? "in_progress" : "not_started");
     const progress: PactContentProgress = {
       id: existing?.id ?? crypto.randomUUID(),
+      scope: existing?.scope ?? "user",
       courseId: input.user.courseId,
       cohortId: input.user.cohortId,
       squadId: input.user.squadId,
@@ -994,6 +1018,61 @@ export class PactRepository {
       updatedAt: now
     };
     await this.contentProgress().updateOne({ userId: input.user.id, contentId: input.content.id }, { $set: progress }, { upsert: true });
+    return progress;
+  }
+
+  async upsertSquadContentProgress(input: {
+    user: PactUser;
+    content: PactContent;
+    answers?: Record<string, PactAnswerValue>;
+    mechanicsState?: PactMechanicsState;
+    progressPercent?: number;
+    status?: PactContentProgress["status"];
+    startedAt?: string;
+    submittedAt?: string;
+    score?: number;
+    maxScore?: number;
+  }) {
+    if (!input.user.squadId) {
+      throw new AppError(409, "SQUAD_REQUIRED", "A squad assignment is required for squad progress");
+    }
+    const now = new Date().toISOString();
+    const key = {
+      scope: "squad" as const,
+      courseId: input.user.courseId,
+      cohortId: input.user.cohortId,
+      squadId: input.user.squadId,
+      contentId: input.content.id
+    };
+    const existing = await this.contentProgress().findOne(key);
+    const answers = input.answers ?? existing?.answers ?? {};
+    const mechanicsState = input.mechanicsState ?? existing?.mechanicsState;
+    const answeredQuestionIds = Object.keys(answers).filter((questionId) => answers[questionId] !== undefined);
+    const progressPercent = input.progressPercent ?? deriveProgressPercent(answeredQuestionIds.length, input.content);
+    const status = input.status ?? (progressPercent > 0 ? "in_progress" : "not_started");
+    const progress: PactContentProgress = {
+      id: existing?.id ?? crypto.randomUUID(),
+      scope: "squad",
+      courseId: input.user.courseId,
+      cohortId: input.user.cohortId,
+      squadId: input.user.squadId,
+      userId: squadProgressUserId(input.user.squadId),
+      updatedByUserId: input.user.id,
+      contentId: input.content.id,
+      contentType: input.content.type,
+      answers,
+      mechanicsState,
+      answeredQuestionIds,
+      progressPercent,
+      score: input.score ?? existing?.score,
+      maxScore: input.maxScore ?? existing?.maxScore,
+      status,
+      startedAt: existing?.startedAt ?? input.startedAt ?? startedAtFromMechanicsState(mechanicsState),
+      submittedAt: status === "submitted" ? (existing?.submittedAt ?? input.submittedAt ?? now) : existing?.submittedAt,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    };
+    await this.contentProgress().updateOne(key, { $set: progress }, { upsert: true });
     return progress;
   }
 
@@ -1217,7 +1296,11 @@ export class PactRepository {
       .sort({ name: 1, email: 1, id: 1 })
       .toArray();
     const [progressRecords, content, squads] = await Promise.all([
-      this.contentProgress().find({ courseId: session.courseId, cohortId }).toArray(),
+      this.contentProgress().find({
+        courseId: session.courseId,
+        cohortId,
+        $or: [{ scope: "user" }, { scope: { $exists: false } }]
+      }).toArray(),
       this.content().find({ courseId: session.courseId, $or: globalOrCohortFilter(cohortId) }).toArray(),
       this.squads().find({ courseId: session.courseId, cohortId }).toArray()
     ]);
@@ -1353,6 +1436,10 @@ function startedAtFromMechanicsState(mechanicsState: PactMechanicsState | undefi
   const startedAt = mechanicsState.startedAt;
   if (typeof startedAt !== "string") return undefined;
   return Number.isFinite(Date.parse(startedAt)) ? startedAt : undefined;
+}
+
+function squadProgressUserId(squadId: string) {
+  return `squad:${squadId}`;
 }
 
 function synthesisResponsesFromState(mechanicsState: PactMechanicsState | undefined): Record<string, string> {

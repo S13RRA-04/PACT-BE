@@ -1,5 +1,5 @@
 export type PactRole = "admin" | "instructor" | "learner";
-export type ContentType = "module" | "challenge" | "game" | "assessment";
+export type ContentType = "module" | "challenge" | "workshop" | "game" | "assessment";
 export type ContentStatus = "draft" | "published" | "archived";
 export type SquadNumber = "1" | "2" | "3" | "4";
 
@@ -289,10 +289,12 @@ export type PactMechanicsState = Record<string, unknown>;
 
 export type PactContentProgress = {
   id: string;
+  scope?: "user" | "squad";
   courseId: string;
   cohortId: string;
   squadId?: string;
   userId: string;
+  updatedByUserId?: string;
   contentId: string;
   contentType: ContentType;
   answers: Record<string, PactAnswerValue>;

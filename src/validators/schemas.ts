@@ -113,7 +113,7 @@ export const contentCreateSchema = z.object({
   courseId: z.string().min(1),
   cohortId: z.string().min(1).optional(),
   role: z.enum(["admin", "instructor", "learner", "all"]).default("all"),
-  type: z.enum(["module", "challenge", "game", "assessment"]),
+  type: z.enum(["module", "challenge", "workshop", "game", "assessment"]),
   title: z.string().min(1).max(200),
   lmsLabel: z.string().min(1).max(200).optional(),
   prompt: z.string().min(1).max(4000),
@@ -133,10 +133,10 @@ export const contentCreateSchema = z.object({
       path: ["mechanics", "kind"]
     });
   }
-  if (content.type === "module") {
+  if (content.type === "module" || content.type === "workshop") {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "module content does not support mechanics",
+      message: `${content.type} content does not support mechanics`,
       path: ["mechanics"]
     });
   }
@@ -156,7 +156,7 @@ export const contentCreateSchema = z.object({
   }
 });
 
-function expectedMechanicsKind(type: "module" | "challenge" | "game" | "assessment") {
+function expectedMechanicsKind(type: "module" | "challenge" | "workshop" | "game" | "assessment") {
   if (type === "challenge") return "challenge_path";
   if (type === "game") return "packet_capture";
   if (type === "assessment") return "readiness_checklist";

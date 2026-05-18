@@ -92,9 +92,28 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/content/squad-progress", async (req, res, next) => {
+    try {
+      res.status(200).json({ progress: await pactService(config).then((service) => service.getSquadContentProgress(requireSession(req))) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/content/:contentId/completion", async (req, res, next) => {
     try {
       res.status(200).json(await pactService(config).then((service) => service.getContentCompletionStatus(
+        requireSession(req),
+        req.params.contentId
+      )));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/content/:contentId/squad-progress", async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.getSquadContentProgressForContent(
         requireSession(req),
         req.params.contentId
       )));
@@ -109,6 +128,30 @@ export function createApiRouter(config: AppConfig) {
         requireSession(req),
         req.params.contentId,
         contentProgressUpdateSchema.parse(req.body)
+      )));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch("/content/:contentId/squad-progress", async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.updateSquadContentProgress(
+        requireSession(req),
+        req.params.contentId,
+        contentProgressUpdateSchema.parse(req.body)
+      )));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/content/:contentId/squad-score", async (req, res, next) => {
+    try {
+      res.status(201).json(await pactService(config).then((service) => service.submitSquadScore(
+        requireSession(req),
+        req.params.contentId,
+        scoreSubmitSchema.omit({ contentId: true, agsAccessToken: true }).parse(req.body)
       )));
     } catch (error) {
       next(error);
@@ -524,7 +567,7 @@ function parseLaunchContentType(value: string | undefined): ContentType | undefi
     return undefined;
   }
 
-  if (value === "module" || value === "challenge" || value === "game" || value === "assessment") {
+  if (value === "module" || value === "challenge" || value === "workshop" || value === "game" || value === "assessment") {
     return value;
   }
 

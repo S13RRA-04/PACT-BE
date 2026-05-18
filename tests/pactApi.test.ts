@@ -2820,6 +2820,159 @@ describe("PACT API", () => {
     });
   });
 
+  it("persists challenge and workshop progress as one shared squad record", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "squad-progress-a",
+        lmsUserId: "lms-squad-progress-a",
+        role: "learner",
+        courseId: "pact",
+        cohortId: "cohort-squad-progress",
+        squadId: "squad-progress-1",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "squad-progress-b",
+        lmsUserId: "lms-squad-progress-b",
+        role: "learner",
+        courseId: "pact",
+        cohortId: "cohort-squad-progress",
+        squadId: "squad-progress-1",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "squad-progress-unassigned",
+        lmsUserId: "lms-squad-progress-unassigned",
+        role: "learner",
+        courseId: "pact",
+        cohortId: "cohort-squad-progress",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactContent").insertMany([
+      {
+        ...publishedContent("squad-progress-challenge", "cohort-squad-progress", "learner", "published", "challenge"),
+        mechanics: {
+          kind: "challenge_path",
+          title: "Squad challenge",
+          prompt: "Complete together.",
+          synthesisPrompts: [{ id: "summary", label: "Summary", prompt: "What happened?", required: true }],
+          paths: [{ id: "contain", label: "Contain", detail: "Contain the incident.", score: 10 }]
+        }
+      },
+      publishedContent("squad-progress-workshop", "cohort-squad-progress", "learner", "published", "workshop"),
+      publishedContent("squad-progress-module", "cohort-squad-progress", "learner", "published", "module")
+    ]);
+    const learnerAToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "squad-progress-a",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-squad-progress",
+      squadId: "squad-progress-1"
+    });
+    const learnerBToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "squad-progress-b",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-squad-progress",
+      squadId: "squad-progress-1"
+    });
+    const unassignedToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "squad-progress-unassigned",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-squad-progress"
+    });
+
+    const challengeProgress = await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/squad-progress-challenge/squad-progress")
+      .set("authorization", `Bearer ${learnerAToken}`)
+      .send({
+        mechanicsState: {
+          synthesisResponses: { summary: "Shared answer" }
+        },
+        progressPercent: 60,
+        status: "in_progress"
+      })
+      .expect(200);
+
+    expect(challengeProgress.body).toMatchObject({
+      scope: "squad",
+      userId: "squad:squad-progress-1",
+      updatedByUserId: "squad-progress-a",
+      squadId: "squad-progress-1",
+      contentId: "squad-progress-challenge",
+      contentType: "challenge",
+      progressPercent: 60,
+      status: "in_progress",
+      mechanicsState: { synthesisResponses: { summary: "Shared answer" } }
+    });
+
+    const sharedProgress = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content/squad-progress-challenge/squad-progress")
+      .set("authorization", `Bearer ${learnerBToken}`)
+      .expect(200);
+
+    expect(sharedProgress.body.progress).toMatchObject({
+      id: challengeProgress.body.id,
+      scope: "squad",
+      squadId: "squad-progress-1",
+      contentId: "squad-progress-challenge",
+      mechanicsState: { synthesisResponses: { summary: "Shared answer" } }
+    });
+
+    const workshopScore = await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/squad-progress-workshop/squad-score")
+      .set("authorization", `Bearer ${learnerBToken}`)
+      .send({ score: 9, maxScore: 10, progressPercent: 100 })
+      .expect(201);
+
+    expect(workshopScore.body).toMatchObject({
+      scope: "squad",
+      updatedByUserId: "squad-progress-b",
+      squadId: "squad-progress-1",
+      contentId: "squad-progress-workshop",
+      contentType: "workshop",
+      status: "submitted",
+      score: 9,
+      maxScore: 10,
+      progressPercent: 100,
+      agsStatus: "not_applicable"
+    });
+
+    const squadProgressRecords = await db.collection("test_pactContentProgress")
+      .find({ scope: "squad", squadId: "squad-progress-1" })
+      .toArray();
+    expect(squadProgressRecords).toHaveLength(2);
+    expect(await db.collection("test_pactScores").countDocuments({ contentId: "squad-progress-workshop" })).toBe(0);
+
+    const listResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content/squad-progress")
+      .set("authorization", `Bearer ${learnerAToken}`)
+      .expect(200);
+    expect(listResponse.body.progress.map((item: { contentId: string }) => item.contentId).sort()).toEqual([
+      "squad-progress-challenge",
+      "squad-progress-workshop"
+    ]);
+
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/squad-progress-module/squad-progress")
+      .set("authorization", `Bearer ${learnerAToken}`)
+      .send({ progressPercent: 100, status: "submitted" })
+      .expect(400);
+
+    await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/squad-progress-challenge/squad-progress")
+      .set("authorization", `Bearer ${unassignedToken}`)
+      .send({ progressPercent: 100, status: "submitted" })
+      .expect(409);
+  });
+
   it("records per-question attempts and exposes instructor review without LMS user IDs", async () => {
     const db = await getMongoDb(config);
     await db.collection("test_pactContent").updateOne(

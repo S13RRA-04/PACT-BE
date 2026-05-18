@@ -47,5 +47,5 @@ export class SessionService {
 }
 
 function isContentType(value: unknown): value is ContentType {
-  return value === "module" || value === "challenge" || value === "game" || value === "assessment";
+  return value === "module" || value === "challenge" || value === "workshop" || value === "game" || value === "assessment";
 }
