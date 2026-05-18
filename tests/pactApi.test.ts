@@ -1,4 +1,5 @@
 import http from "node:http";
+import { createHmac } from "node:crypto";
 import { exportJWK, exportPKCS8, generateKeyPair, SignJWT, type KeyLike } from "jose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import request from "supertest";
@@ -63,7 +64,8 @@ beforeAll(async () => {
     agsRetryExhaustedWebhookBearerToken: undefined,
     agsRetryExhaustedWebhookMaxAttempts: 5,
     agsRetryExhaustedWebhookInitialDelayMs: 60000,
-    agsRetryExhaustedWebhookMaxDelayMs: 3600000
+    agsRetryExhaustedWebhookMaxDelayMs: 3600000,
+    linearBugSyncEnabled: false
   };
   await ensureMongoCollections(config);
 });
@@ -107,6 +109,82 @@ describe("PACT API", () => {
       .expect(200);
 
     expect(response.body.map((item: { id: string }) => item.id)).toEqual(["content-1", "content-global"]);
+  });
+
+  it("serves only unlocked challenge releases and release questions to learners", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactUsers").insertOne({
+      id: "release-learner",
+      lmsUserId: "lms-release-learner",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-release",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("release-challenge", "cohort-release", "learner", "published", "challenge", false),
+      mechanics: {
+        kind: "challenge_path",
+        title: "Release challenge",
+        prompt: "Review released evidence.",
+        releases: [
+          {
+            id: "release-1",
+            title: "Initial release",
+            summary: "Unlocked files.",
+            unlocked: true,
+            files: [{ key: "challenges/release-1/brief.pdf", title: "Brief" }],
+            questionIds: ["release-q1"]
+          },
+          {
+            id: "release-2",
+            title: "Locked release",
+            summary: "Not yet available.",
+            unlocked: false,
+            files: [{ key: "challenges/release-2/edr.pdf", title: "EDR" }],
+            questionIds: ["release-q2"]
+          }
+        ],
+        paths: [{ id: "develop", label: "Develop", detail: "Build the case.", score: 100 }]
+      },
+      questions: [
+        { ...policyQuestion("release-q1", { kind: "true_false", correct: true }, { points: 5 }), releaseId: "release-1" },
+        { ...policyQuestion("release-q2", { kind: "true_false", correct: true }, { points: 5 }), releaseId: "release-2" }
+      ]
+    });
+
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "release-learner",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-release"
+    });
+    const r2Config = {
+      ...config,
+      r2AccountId: "test-account",
+      r2AccessKeyId: "test-access",
+      r2SecretAccessKey: "test-secret",
+      r2BucketName: "pact"
+    };
+
+    const response = await request(createApp(r2Config, createLogger(r2Config)))
+      .get("/api/v1/content")
+      .set("authorization", `Bearer ${token}`)
+      .expect(200);
+
+    const challenge = response.body.find((item: { id: string }) => item.id === "release-challenge");
+    expect(challenge.mechanics.releases).toHaveLength(1);
+    expect(challenge.mechanics.releases[0]).toMatchObject({ id: "release-1" });
+    expect(challenge.mechanics.releases[0].files[0].viewUrl).toContain("X-Amz-Signature=");
+    expect(JSON.stringify(challenge)).not.toContain("release-2");
+    expect(challenge.questions.map((question: { id: string }) => question.id)).toEqual(["release-q1"]);
+
+    await request(createApp(r2Config, createLogger(r2Config)))
+      .post("/api/v1/content/release-challenge/questions/release-q2/attempts")
+      .set("authorization", `Bearer ${token}`)
+      .send({ answer: true, feedbackExposed: true })
+      .expect(404);
   });
 
   it("requires instructor unlock before learners can see or access published content", async () => {
@@ -3431,6 +3509,127 @@ describe("PACT API", () => {
       .expect((response) => {
         expect(response.body.error).toMatchObject({ code: "TARGET_LINK_REQUIRED" });
       });
+  });
+
+  it("creates authenticated bug reports and syncs them to Linear", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          teams: { nodes: [{ id: "linear-team-id", key: "PACT", name: "PACT" }] },
+          projects: { nodes: [{ id: "linear-project-id", name: "PACT Bugs" }] }
+        }
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          issueCreate: {
+            success: true,
+            issue: {
+              id: "linear-issue-id",
+              identifier: "PACT-42",
+              title: "[PACT Bug] Activity will not submit",
+              url: "https://linear.app/cetu/issue/PACT-42/activity-will-not-submit",
+              state: { name: "Triage", type: "unstarted" }
+            }
+          }
+        }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const linearConfig: AppConfig = {
+      ...config,
+      linearBugSyncEnabled: true,
+      linearApiKey: "lin_api_test",
+      linearTeamKey: "PACT",
+      linearProjectName: "PACT Bugs"
+    };
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "bug-reporter",
+      role: "learner",
+      courseId: "pact-bugs",
+      cohortId: "cohort-bugs",
+      squadId: "squad-1"
+    });
+
+    try {
+      const response = await request(createApp(linearConfig, createLogger(linearConfig)))
+        .post("/api/v1/bug-reports")
+        .set("authorization", `Bearer ${token}`)
+        .send({
+          title: "Activity will not submit",
+          description: "The submit button stays disabled after I answer every question.",
+          severity: "high",
+          pageUrl: "https://pact.example.test/training",
+          userAgent: "vitest"
+        })
+        .expect(201);
+
+      expect(response.body).toMatchObject({
+        title: "Activity will not submit",
+        reporterUserId: "bug-reporter",
+        linearIssueId: "linear-issue-id",
+        linearIssueIdentifier: "PACT-42",
+        linearIssueState: "Triage",
+        syncStatus: "synced"
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const mutationBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+      expect(mutationBody.variables.input).toMatchObject({
+        teamId: "linear-team-id",
+        projectId: "linear-project-id",
+        priority: 2
+      });
+      expect(mutationBody.variables.input.description).toContain("PACT bug report ID:");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("syncs Linear webhook issue state updates for bug reports", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactBugReports").insertOne({
+      id: "bug-report-webhook",
+      title: "Webhook report",
+      description: "A report created before the webhook update.",
+      severity: "medium",
+      courseId: "pact-bugs",
+      cohortId: "cohort-bugs",
+      reporterUserId: "bug-reporter",
+      reporterRole: "learner",
+      linearIssueId: "linear-issue-webhook",
+      linearIssueIdentifier: "PACT-99",
+      syncStatus: "synced",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    const webhookConfig = { ...config, linearWebhookSecret: "test-linear-webhook-secret" };
+    const body = JSON.stringify({
+      type: "Issue",
+      action: "update",
+      webhookTimestamp: Date.now(),
+      data: {
+        id: "linear-issue-webhook",
+        identifier: "PACT-99",
+        url: "https://linear.app/cetu/issue/PACT-99/webhook-report",
+        state: { name: "Done", type: "completed" }
+      }
+    });
+    const signature = createHmac("sha256", webhookConfig.linearWebhookSecret).update(body).digest("hex");
+
+    await request(createApp(webhookConfig, createLogger(webhookConfig)))
+      .post("/api/v1/webhooks/linear")
+      .set("linear-signature", signature)
+      .set("content-type", "application/json")
+      .send(body)
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toMatchObject({ matched: 1, modified: 1 });
+      });
+
+    const report = await db.collection("test_pactBugReports").findOne({ id: "bug-report-webhook" });
+    expect(report).toMatchObject({
+      linearIssueIdentifier: "PACT-99",
+      linearIssueState: "Done",
+      linearIssueUrl: "https://linear.app/cetu/issue/PACT-99/webhook-report"
+    });
   });
 
   it("maps unavailable LMS JWKS to an explicit LTI platform error", async () => {

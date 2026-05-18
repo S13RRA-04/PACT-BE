@@ -68,4 +68,71 @@ describe("content mechanics schema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("accepts released case files and evidence artifacts for challenges", () => {
+    const parsed = contentCreateSchema.parse({
+      ...baseContent,
+      type: "challenge",
+      mechanics: {
+        kind: "challenge_path",
+        title: "Build the case",
+        prompt: "Review released files and synthesize a working theory.",
+        caseFiles: [
+          {
+            id: "case-brief",
+            title: "Initial case brief",
+            summary: "Victim report and timeline anchor.",
+            releaseLabel: "Release 1",
+            classification: "Training"
+          }
+        ],
+        releases: [
+          {
+            id: "release-1",
+            title: "Initial release",
+            summary: "Case files stored in R2 for learner review.",
+            releaseLabel: "Release 1",
+            unlocked: true,
+            files: [
+              {
+                key: "challenges/case-1/brief.pdf",
+                title: "Case brief",
+                description: "Initial release packet.",
+                contentType: "application/pdf"
+              }
+            ],
+            questionIds: ["theory-check"]
+          }
+        ],
+        evidenceArtifacts: [
+          {
+            id: "headers",
+            title: "Email headers",
+            source: "Mailbox export",
+            detail: "Relay path and authentication results.",
+            releasedAt: "Day 2",
+            tags: ["identity", "timeline"]
+          }
+        ],
+        synthesisPrompts: [
+          {
+            id: "theory",
+            label: "Working theory",
+            prompt: "State the theory of compromise and supporting facts.",
+            required: true
+          }
+        ],
+        defaultPathId: "develop",
+        paths: [{ id: "develop", label: "Develop case", detail: "Continue analysis with validated evidence.", score: 90 }]
+      }
+    });
+
+    expect(parsed.mechanics).toMatchObject({
+      kind: "challenge_path",
+      releases: [expect.objectContaining({ id: "release-1", unlocked: true })],
+      caseFiles: [expect.objectContaining({ id: "case-brief" })],
+      evidenceArtifacts: [expect.objectContaining({ id: "headers" })],
+      synthesisPrompts: [expect.objectContaining({ id: "theory" })]
+    });
+  });
 });

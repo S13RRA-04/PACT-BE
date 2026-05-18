@@ -6,6 +6,7 @@ const localizedTextSchema = z.record(z.string().min(1));
 
 const questionSchema = z.object({
   id: z.string().min(1),
+  releaseId: z.string().min(1).max(80).optional(),
   version: z.number().int().positive(),
   supersedes: z.string().nullable(),
   type: z.string().min(1),

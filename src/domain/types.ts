@@ -61,6 +61,7 @@ export type PactAgsContext = {
 
 export type PactQuestion = {
   id: string;
+  releaseId?: string;
   version: number;
   supersedes: string | null;
   type: string;
@@ -89,6 +90,43 @@ export type ChallengeMechanics = {
   title: string;
   prompt: string;
   resultLabel?: string;
+  releases?: Array<{
+    id: string;
+    title: string;
+    summary: string;
+    releaseLabel?: string;
+    unlocked: boolean;
+    files: Array<{
+      key: string;
+      title?: string;
+      description?: string;
+      contentType?: string;
+      viewUrl?: string;
+      downloadUrl?: string;
+    }>;
+    questionIds?: string[];
+  }>;
+  caseFiles?: Array<{
+    id: string;
+    title: string;
+    summary: string;
+    releaseLabel?: string;
+    classification?: string;
+  }>;
+  evidenceArtifacts?: Array<{
+    id: string;
+    title: string;
+    source: string;
+    detail: string;
+    releasedAt?: string;
+    tags?: string[];
+  }>;
+  synthesisPrompts?: Array<{
+    id: string;
+    label: string;
+    prompt: string;
+    required?: boolean;
+  }>;
   defaultPathId?: string;
   paths: Array<{
     id: string;
@@ -194,6 +232,31 @@ export type PactNotification = {
   nextAttemptAt: string;
   lastStatus?: number;
   lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PactBugReportSeverity = "low" | "medium" | "high" | "critical";
+export type PactBugReportSyncStatus = "disabled" | "pending" | "synced" | "failed";
+
+export type PactBugReport = {
+  id: string;
+  title: string;
+  description: string;
+  severity: PactBugReportSeverity;
+  pageUrl?: string;
+  userAgent?: string;
+  courseId: string;
+  cohortId: string;
+  squadId?: string;
+  reporterUserId: string;
+  reporterRole: PactRole;
+  linearIssueId?: string;
+  linearIssueIdentifier?: string;
+  linearIssueUrl?: string;
+  linearIssueState?: string;
+  syncStatus: PactBugReportSyncStatus;
+  syncError?: string;
   createdAt: string;
   updatedAt: string;
 };

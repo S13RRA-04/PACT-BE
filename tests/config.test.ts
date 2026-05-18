@@ -82,6 +82,35 @@ describe("config", () => {
     expect(config.agsProcessDueSchedulerSecret).toBe("scheduler-secret-with-enough-length");
   });
 
+  it("parses Cloudflare R2 endpoint-style storage configuration", () => {
+    const config = loadConfig({
+      NODE_ENV: "production",
+      APP_BASE_URL: "https://pact2-api.cetu.online",
+      MONGO_URI: "mongodb://user:password@localhost:27017",
+      LMS_API_BASE_URL: "https://lms-api.cetu.online",
+      LMS_PLATFORM_ISSUER: "https://lms-api.cetu.online",
+      LMS_PLATFORM_JWKS_URI: "https://lms-api.cetu.online/api/v1/lti/jwks",
+      LMS_DEEP_LINK_RETURN_URL: "https://lms-api.cetu.online/api/v1/lti/deep-linking/return",
+      PACT_LTI_CLIENT_ID: "pact-tool",
+      PACT_LTI_DEPLOYMENT_IDS: "pact-course-deployment",
+      PACT_SESSION_SECRET: "test-secret-with-enough-length",
+      STORAGE_PROVIDER: "cloudflare",
+      R2_ENDPOINT: "https://account-id.r2.cloudflarestorage.com",
+      R2_BUCKET: "pact",
+      R2_ACCESS_KEY_ID: "access-key",
+      R2_SECRET_ACCESS_KEY: "secret-key",
+      R2_PUBLIC_BASE_URL: "https://pact-storage.example.test",
+      R2_DECKS_PREFIX: "decks/"
+    });
+
+    expect(config.storageProvider).toBe("cloudflare");
+    expect(config.r2Endpoint).toBe("https://account-id.r2.cloudflarestorage.com");
+    expect(config.r2AccountId).toBe("account-id");
+    expect(config.r2BucketName).toBe("pact");
+    expect(config.r2PublicBaseUrl).toBe("https://pact-storage.example.test");
+    expect(config.r2DecksPrefix).toBe("decks/");
+  });
+
   it("rejects LMS or Keycloak database names for PACT persistence", () => {
     const baseEnv = {
       NODE_ENV: "production",

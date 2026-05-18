@@ -13,7 +13,12 @@ export function createApp(config: AppConfig, logger: AppLogger) {
   app.disable("x-powered-by");
   app.use(helmet());
   app.use(cors({ origin: config.corsOrigins, credentials: true }));
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({
+    limit: "1mb",
+    verify: (req, _res, buf) => {
+      (req as express.Request).rawBody = Buffer.from(buf);
+    }
+  }));
   app.use(express.urlencoded({ extended: false, limit: "1mb" }));
   app.use(requestId);
   app.use((pinoHttp as unknown as (options: { logger: AppLogger }) => express.RequestHandler)({ logger }));
@@ -26,4 +31,12 @@ export function createApp(config: AppConfig, logger: AppLogger) {
   app.use("/api/v1", createApiRouter(config));
   app.use(errorHandler(logger));
   return app;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      rawBody?: Buffer;
+    }
+  }
 }

@@ -2,7 +2,7 @@ import type { Db, Filter } from "mongodb";
 import type { AppConfig } from "../config/config.js";
 import { collectionName } from "../db/mongo.js";
 import { AppError } from "../errors/AppError.js";
-import type { ContentMechanics, ContentStatus, ContentType, PactAgsContext, PactAgsPublishAttempt, PactAnswerValue, PactAuditEvent, PactContent, PactContentProgress, PactMechanicsState, PactNotification, PactQuestionAttempt, PactQuestionGrade, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
+import type { ContentMechanics, ContentStatus, ContentType, PactAgsContext, PactAgsPublishAttempt, PactAnswerValue, PactAuditEvent, PactBugReport, PactContent, PactContentProgress, PactMechanicsState, PactNotification, PactQuestionAttempt, PactQuestionGrade, PactRole, PactScore, PactUser, Squad, SquadNumber } from "../domain/types.js";
 
 export class PactRepository {
   constructor(private readonly db: Db, private readonly config: AppConfig) {}
@@ -42,6 +42,65 @@ export class PactRepository {
     const squad: Squad = { id: crypto.randomUUID(), ...input, createdAt: now, updatedAt: now };
     await this.squads().insertOne(squad);
     return squad;
+  }
+
+  async createBugReport(input: Omit<PactBugReport, "id" | "createdAt" | "updatedAt">) {
+    const now = new Date().toISOString();
+    const report: PactBugReport = {
+      id: crypto.randomUUID(),
+      ...input,
+      createdAt: now,
+      updatedAt: now
+    };
+    await this.bugReports().insertOne(report);
+    return report;
+  }
+
+  async updateBugReportLinearSync(reportId: string, input: {
+    linearIssueId?: string;
+    linearIssueIdentifier?: string;
+    linearIssueUrl?: string;
+    linearIssueState?: string;
+    syncStatus: PactBugReport["syncStatus"];
+    syncError?: string;
+  }) {
+    const updatedAt = new Date().toISOString();
+    await this.bugReports().updateOne(
+      { id: reportId },
+      {
+        $set: {
+          ...input,
+          updatedAt
+        },
+        $unset: input.syncError ? {} : { syncError: "" }
+      }
+    );
+    const report = await this.bugReports().findOne({ id: reportId });
+    if (!report) throw new AppError(404, "BUG_REPORT_NOT_FOUND", "Bug report was not found");
+    return report;
+  }
+
+  async syncBugReportFromLinearIssue(input: {
+    linearIssueId: string;
+    linearIssueIdentifier?: string;
+    linearIssueUrl?: string;
+    linearIssueState?: string;
+  }) {
+    const updatedAt = new Date().toISOString();
+    const result = await this.bugReports().updateOne(
+      { linearIssueId: input.linearIssueId },
+      {
+        $set: {
+          linearIssueIdentifier: input.linearIssueIdentifier,
+          linearIssueUrl: input.linearIssueUrl,
+          linearIssueState: input.linearIssueState,
+          syncStatus: "synced",
+          updatedAt
+        },
+        $unset: { syncError: "" }
+      }
+    );
+    return { matched: result.matchedCount, modified: result.modifiedCount };
   }
 
   async listAdminCohorts(session: { role: PactRole; courseId: string; cohortId: string }) {
@@ -1165,6 +1224,10 @@ export class PactRepository {
 
   private notifications() {
     return this.db.collection<PactNotification>(collectionName(this.config, "pactNotifications"));
+  }
+
+  private bugReports() {
+    return this.db.collection<PactBugReport>(collectionName(this.config, "pactBugReports"));
   }
 }
 

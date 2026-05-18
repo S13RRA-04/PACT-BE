@@ -34,7 +34,21 @@ const envSchema = z.object({
   AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
   AGS_RETRY_EXHAUSTED_WEBHOOK_INITIAL_DELAY_MS: z.coerce.number().int().min(1000).default(60000),
   AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_DELAY_MS: z.coerce.number().int().min(1000).default(3600000),
-  AGS_PROCESS_DUE_SCHEDULER_SECRET: optionalTrimmedString(16)
+  AGS_PROCESS_DUE_SCHEDULER_SECRET: optionalTrimmedString(16),
+  STORAGE_PROVIDER: z.enum(["cloudflare"]).optional(),
+  R2_ENDPOINT: z.string().url().optional(),
+  R2_ACCOUNT_ID: z.string().min(1).optional(),
+  R2_ACCESS_KEY_ID: z.string().min(1).optional(),
+  R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  R2_BUCKET: z.string().min(1).optional(),
+  R2_BUCKET_NAME: z.string().min(1).optional(),
+  R2_PUBLIC_BASE_URL: z.string().url().optional(),
+  R2_DECKS_PREFIX: z.string().optional(),
+  LINEAR_API_KEY: optionalTrimmedString(1),
+  LINEAR_BUG_SYNC_ENABLED: booleanEnvSchema(false),
+  LINEAR_TEAM_KEY: optionalTrimmedString(1),
+  LINEAR_PROJECT_NAME: optionalTrimmedString(1),
+  LINEAR_WEBHOOK_SECRET: optionalTrimmedString(16)
 });
 
 export type AppConfig = {
@@ -68,6 +82,19 @@ export type AppConfig = {
   agsRetryExhaustedWebhookInitialDelayMs: number;
   agsRetryExhaustedWebhookMaxDelayMs: number;
   agsProcessDueSchedulerSecret?: string;
+  storageProvider?: "cloudflare";
+  r2Endpoint?: string;
+  r2AccountId?: string;
+  r2AccessKeyId?: string;
+  r2SecretAccessKey?: string;
+  r2BucketName?: string;
+  r2PublicBaseUrl?: string;
+  r2DecksPrefix?: string;
+  linearApiKey?: string;
+  linearBugSyncEnabled: boolean;
+  linearTeamKey?: string;
+  linearProjectName?: string;
+  linearWebhookSecret?: string;
 };
 
 export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
@@ -84,6 +111,11 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     : parsed.MONGO_COLLECTION_PREFIX ?? (parsed.NODE_ENV === "production" ? "" : "pact_dev_");
   const mongoDbName = parsed.MONGODB_DB ?? parsed.MONGO_DB_NAME ?? "PACT_V4";
   assertPactMongoDatabaseName(mongoDbName);
+  if (parsed.LINEAR_BUG_SYNC_ENABLED && (!parsed.LINEAR_API_KEY || !parsed.LINEAR_TEAM_KEY)) {
+    throw new Error("LINEAR_API_KEY and LINEAR_TEAM_KEY are required when LINEAR_BUG_SYNC_ENABLED is true.");
+  }
+  const r2AccountId = parsed.R2_ACCOUNT_ID ?? accountIdFromR2Endpoint(parsed.R2_ENDPOINT);
+  const r2BucketName = parsed.R2_BUCKET_NAME ?? parsed.R2_BUCKET;
 
   return {
     env: parsed.NODE_ENV,
@@ -115,8 +147,32 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     agsRetryExhaustedWebhookMaxAttempts: parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_ATTEMPTS,
     agsRetryExhaustedWebhookInitialDelayMs: parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_INITIAL_DELAY_MS,
     agsRetryExhaustedWebhookMaxDelayMs: Math.max(parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_INITIAL_DELAY_MS, parsed.AGS_RETRY_EXHAUSTED_WEBHOOK_MAX_DELAY_MS),
-    agsProcessDueSchedulerSecret: parsed.AGS_PROCESS_DUE_SCHEDULER_SECRET
+    agsProcessDueSchedulerSecret: parsed.AGS_PROCESS_DUE_SCHEDULER_SECRET,
+    storageProvider: parsed.STORAGE_PROVIDER,
+    r2Endpoint: parsed.R2_ENDPOINT?.replace(/\/$/, ""),
+    r2AccountId,
+    r2AccessKeyId: parsed.R2_ACCESS_KEY_ID,
+    r2SecretAccessKey: parsed.R2_SECRET_ACCESS_KEY,
+    r2BucketName,
+    r2PublicBaseUrl: parsed.R2_PUBLIC_BASE_URL?.replace(/\/$/, ""),
+    r2DecksPrefix: parsed.R2_DECKS_PREFIX,
+    linearApiKey: parsed.LINEAR_API_KEY,
+    linearBugSyncEnabled: parsed.LINEAR_BUG_SYNC_ENABLED,
+    linearTeamKey: parsed.LINEAR_TEAM_KEY,
+    linearProjectName: parsed.LINEAR_PROJECT_NAME,
+    linearWebhookSecret: parsed.LINEAR_WEBHOOK_SECRET
   };
+}
+
+function accountIdFromR2Endpoint(endpoint: string | undefined) {
+  if (!endpoint) return undefined;
+  const hostname = new URL(endpoint).hostname;
+  const suffix = ".r2.cloudflarestorage.com";
+  if (!hostname.endsWith(suffix)) {
+    throw new Error("R2_ENDPOINT must use a Cloudflare R2 endpoint hostname.");
+  }
+  const accountId = hostname.slice(0, -suffix.length);
+  return accountId || undefined;
 }
 
 function buildMongoUri(mongoUri: string, username?: string, password?: string) {

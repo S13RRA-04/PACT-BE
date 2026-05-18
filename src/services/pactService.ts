@@ -2,6 +2,7 @@ import { AppError, isAppError } from "../errors/AppError.js";
 import { LmsAgsClient } from "../integrations/lmsAgsClient.js";
 import { LmsTokenClient } from "../integrations/lmsTokenClient.js";
 import { PactRepository } from "../repositories/pactRepository.js";
+import { presignR2GetObject } from "./r2Service.js";
 import { assertQuestionAttemptAllowed, evaluateAssignmentCompletion, isManualQuestion, type EffectiveQuestionAttempt } from "./assignmentCompletionPolicy.js";
 import { scheduleAgsRetry } from "./agsRetryQueue.js";
 import type { PactSession } from "../auth/sessionService.js";
@@ -18,7 +19,8 @@ export class PactService {
 
   async getContent(session: PactSession) {
     const user = await this.repository.requireUser(session.userId);
-    return this.repository.listContentFor(user, session.contentType, session.contentId);
+    const content = await this.repository.listContentFor(user, session.contentType, session.contentId);
+    return content.map((item) => this.prepareContentForUser(user, item));
   }
 
   async getContentProgress(session: PactSession) {
@@ -29,7 +31,7 @@ export class PactService {
 
   async getContentCompletionStatus(session: PactSession, contentId: string) {
     const user = await this.repository.requireUser(session.userId);
-    const content = await this.repository.requireContent(contentId);
+    const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
     this.requireLearnerContentAccess(user, content);
     const [completion, progressRecords, score] = await Promise.all([
       this.evaluateContentCompletion(user, content),
@@ -251,7 +253,7 @@ export class PactService {
 
   async submitScore(session: PactSession, input: { contentId: string; score: number; maxScore?: number; progressPercent: number; agsAccessToken?: string }) {
     const user = await this.repository.requireUser(session.userId);
-    const content = await this.repository.requireContent(input.contentId);
+    const content = this.prepareContentForUser(user, await this.repository.requireContent(input.contentId));
     this.requireLearnerContentAccess(user, content);
 
     if (input.score > (input.maxScore ?? content.maxScore)) {
@@ -306,7 +308,7 @@ export class PactService {
     status?: "not_started" | "in_progress" | "submitted";
   }) {
     const user = await this.repository.requireUser(session.userId);
-    const content = await this.repository.requireContent(contentId);
+    const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
     this.requireLearnerContentAccess(user, content);
     const existingProgress = (await this.repository.listProgressForUser(user, [content.id]))[0];
     if (content.type === "assessment" && existingProgress?.status === "submitted") {
@@ -328,7 +330,7 @@ export class PactService {
     feedbackExposed: boolean;
   }) {
     const user = await this.repository.requireUser(session.userId);
-    const content = await this.repository.requireContent(contentId);
+    const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
     this.requireLearnerContentAccess(user, content);
     const existingProgress = (await this.repository.listProgressForUser(user, [content.id]))[0];
     this.assertAssessmentCanSubmit(content, existingProgress);
@@ -391,6 +393,62 @@ export class PactService {
     if (user.role === "learner" && content.locked !== false) {
       throw new AppError(403, "CONTENT_LOCKED", "Content is locked by the instructor");
     }
+  }
+
+  private prepareContentForUser(user: PactUser, content: PactContent): PactContent {
+    if (content.type !== "challenge" || content.mechanics?.kind !== "challenge_path") {
+      return content;
+    }
+
+    const learnerView = user.role === "learner";
+    const releases = (content.mechanics.releases ?? []).filter((release) => !learnerView || release.unlocked);
+    const visibleReleaseIds = new Set(releases.map((release) => release.id));
+    const visibleQuestionIds = new Set(releases.flatMap((release) => release.questionIds ?? []));
+    const questions = (content.questions ?? []).filter((question) => {
+      if (!question.releaseId) return true;
+      return visibleReleaseIds.has(question.releaseId) || visibleQuestionIds.has(question.id);
+    });
+
+    return {
+      ...content,
+      questionCount: questions.length,
+      questions,
+      mechanics: {
+        ...content.mechanics,
+        releases: releases.map((release) => ({
+          ...release,
+          files: release.files.map((file) => ({
+            ...file,
+            ...this.challengeFileUrls(file.key)
+          }))
+        }))
+      }
+    };
+  }
+
+  private challengeFileUrls(key: string) {
+    const r2Config = this.r2Config();
+    if (!r2Config) return {};
+    const fileName = key.split("/").pop() || "pact-release-file";
+    return {
+      viewUrl: presignR2GetObject(r2Config, key, { expiresIn: 3600 }),
+      downloadUrl: presignR2GetObject(r2Config, key, {
+        expiresIn: 3600,
+        responseContentDisposition: `attachment; filename="${fileName.replace(/"/g, "")}"`
+      })
+    };
+  }
+
+  private r2Config() {
+    const { r2AccountId, r2Endpoint, r2AccessKeyId, r2SecretAccessKey, r2BucketName } = this.config;
+    if ((!r2AccountId && !r2Endpoint) || !r2AccessKeyId || !r2SecretAccessKey || !r2BucketName) return undefined;
+    return {
+      accountId: r2AccountId,
+      endpoint: r2Endpoint,
+      accessKeyId: r2AccessKeyId,
+      secretAccessKey: r2SecretAccessKey,
+      bucketName: r2BucketName
+    };
   }
 
   private async publishScoreToAgs(

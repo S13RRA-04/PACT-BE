@@ -71,6 +71,8 @@ This removes the older same-named scheduled tasks and obsolete local sink servic
 
 Do not put Mongo credentials, LTI private keys, Keycloak secrets, or API tokens in frontend repositories or Cloudflare Pages variables.
 
+Challenge release files are stored in the PACT R2 bucket. Configure R2 only on the backend origin with `R2_ENDPOINT` or `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET` or `R2_BUCKET_NAME`. Learner challenge responses receive short-lived signed view/download URLs only for release files marked unlocked in the challenge mechanics payload.
+
 ## Importing PACT content
 
 Question-bank JSON files can be imported as published PACT content with the full validated question payload stored server-side. Lecture banks import as modules. The bundled `pretest_questions.json` and `posttest_questions.json` banks import as assessment content.
@@ -112,6 +114,7 @@ Use `modules:import:production` for production imports. It forces the production
 - `POST /api/v1/admin/content` creates or updates PACT content.
 - `GET /api/v1/admin/content` lists course content for administrator/instructor gating.
 - `PATCH /api/v1/admin/content/:contentId/status` changes content between `draft`, `published`, and `archived`.
+- `GET /api/v1/admin/r2/documents` lists configured PACT R2 bucket files for administrators and instructors.
 - `GET /api/v1/admin/diagnostics/ags-token-context` reports whether the current launch has AGS score scope for server-side token acquisition.
 - `GET /api/v1/admin/diagnostics/ags-publish-attempts` lists course-scoped AGS publish attempts for administrators and instructors.
 - `GET /api/v1/admin/diagnostics/ags-publish-attempts/export.csv` exports filtered AGS publish attempts as CSV.

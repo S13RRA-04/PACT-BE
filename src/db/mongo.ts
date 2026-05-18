@@ -60,4 +60,7 @@ export async function ensureMongoCollections(config: AppConfig) {
   await db.collection(collectionName(config, "pactAgsContexts")).createIndex({ courseId: 1, cohortId: 1, updatedAt: -1 });
   await db.collection(collectionName(config, "pactNotifications")).createIndex({ status: 1, nextAttemptAt: 1 });
   await db.collection(collectionName(config, "pactNotifications")).createIndex({ event: 1, createdAt: -1 });
+  await db.collection(collectionName(config, "pactBugReports")).createIndex({ courseId: 1, cohortId: 1, createdAt: -1 });
+  await db.collection(collectionName(config, "pactBugReports")).createIndex({ reporterUserId: 1, createdAt: -1 });
+  await db.collection(collectionName(config, "pactBugReports")).createIndex({ linearIssueId: 1 }, { sparse: true });
 }

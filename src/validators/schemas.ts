@@ -26,6 +26,41 @@ const challengeMechanicsSchema = z.object({
   title: z.string().min(1).max(160),
   prompt: z.string().min(1).max(1200),
   resultLabel: z.string().min(1).max(80).optional(),
+  releases: z.array(z.object({
+    id: z.string().min(1).max(80),
+    title: z.string().min(1).max(160),
+    summary: z.string().min(1).max(1200),
+    releaseLabel: z.string().min(1).max(80).optional(),
+    unlocked: z.boolean().default(false),
+    files: z.array(z.object({
+      key: z.string().min(1).max(500),
+      title: z.string().min(1).max(160).optional(),
+      description: z.string().min(1).max(800).optional(),
+      contentType: z.string().min(1).max(120).optional()
+    })).max(24).default([]),
+    questionIds: z.array(z.string().min(1).max(120)).max(100).optional()
+  })).max(12).optional(),
+  caseFiles: z.array(z.object({
+    id: z.string().min(1).max(80),
+    title: z.string().min(1).max(160),
+    summary: z.string().min(1).max(1200),
+    releaseLabel: z.string().min(1).max(80).optional(),
+    classification: z.string().min(1).max(80).optional()
+  })).max(12).optional(),
+  evidenceArtifacts: z.array(z.object({
+    id: z.string().min(1).max(80),
+    title: z.string().min(1).max(160),
+    source: z.string().min(1).max(160),
+    detail: z.string().min(1).max(1200),
+    releasedAt: z.string().min(1).max(80).optional(),
+    tags: z.array(z.string().min(1).max(40)).max(8).optional()
+  })).max(24).optional(),
+  synthesisPrompts: z.array(z.object({
+    id: z.string().min(1).max(80),
+    label: z.string().min(1).max(120),
+    prompt: z.string().min(1).max(800),
+    required: z.boolean().optional()
+  })).max(8).optional(),
   defaultPathId: z.string().min(1).max(80).optional(),
   paths: z.array(z.object({
     id: z.string().min(1).max(80),
@@ -219,4 +254,12 @@ export const schedulerAgsProcessDueSchema = z.object({
 
 export const agsPublishRetrySchema = z.object({
   agsAccessToken: z.string().min(1).optional()
+});
+
+export const bugReportCreateSchema = z.object({
+  title: z.string().trim().min(4).max(160),
+  description: z.string().trim().min(10).max(5000),
+  severity: z.enum(["low", "medium", "high", "critical"]).default("medium"),
+  pageUrl: z.string().url().max(2048).optional(),
+  userAgent: z.string().trim().max(512).optional()
 });

@@ -10,9 +10,11 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 import type { ContentType } from "../domain/types.js";
+import { listR2Documents } from "../services/r2Service.js";
+import { BugReportService } from "../services/bugReportService.js";
 
 export function createApiRouter(config: AppConfig) {
   const router = Router();
@@ -49,6 +51,20 @@ export function createApiRouter(config: AppConfig) {
       requireSchedulerSecret(config, req);
       const input = schedulerAgsProcessDueSchema.parse(req.body ?? {});
       res.status(200).json(await pactService(config).then((service) => service.retryDueAgsPublishAttempts(input.limit)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/webhooks/linear", async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      const result = await new BugReportService(repository, config).handleLinearWebhook({
+        signature: req.header("linear-signature"),
+        rawBody: req.rawBody,
+        body: req.body
+      });
+      res.status(200).json(result);
     } catch (error) {
       next(error);
     }
@@ -120,6 +136,19 @@ export function createApiRouter(config: AppConfig) {
   router.post("/scores", async (req, res, next) => {
     try {
       res.status(201).json(await pactService(config).then((service) => service.submitScore(requireSession(req), scoreSubmitSchema.parse(req.body))));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/bug-reports", async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      const report = await new BugReportService(repository, config).reportBug(
+        requireSession(req),
+        bugReportCreateSchema.parse(req.body)
+      );
+      res.status(201).json(report);
     } catch (error) {
       next(error);
     }
@@ -377,6 +406,20 @@ export function createApiRouter(config: AppConfig) {
         lmsLabel: contentLmsLabelUpdateSchema.parse(req.body).lmsLabel,
         session: requireSession(req)
       }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/r2/documents", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const { r2AccountId, r2Endpoint, r2AccessKeyId, r2SecretAccessKey, r2BucketName } = config;
+      if ((!r2AccountId && !r2Endpoint) || !r2AccessKeyId || !r2SecretAccessKey || !r2BucketName) {
+        throw new AppError(503, "R2_NOT_CONFIGURED", "R2 document storage is not configured");
+      }
+      const prefix = typeof req.query.prefix === "string" ? req.query.prefix : undefined;
+      const documents = await listR2Documents({ accountId: r2AccountId, endpoint: r2Endpoint, accessKeyId: r2AccessKeyId, secretAccessKey: r2SecretAccessKey, bucketName: r2BucketName }, prefix);
+      res.status(200).json({ documents });
     } catch (error) {
       next(error);
     }
