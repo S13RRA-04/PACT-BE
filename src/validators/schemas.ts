@@ -275,3 +275,10 @@ export const releaseImportSchema = z.object({
 export const deckImportSchema = z.object({
   prefix: z.string().trim().min(1).max(1000)
 });
+
+export const agendaUploadSchema = z.object({
+  cohortId: z.string().trim().min(1).max(160).optional(),
+  fileName: z.string().trim().min(1).max(240),
+  contentType: z.string().trim().min(1).max(160).optional(),
+  bodyBase64: z.string().trim().min(1)
+});

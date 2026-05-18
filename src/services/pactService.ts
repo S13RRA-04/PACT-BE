@@ -444,7 +444,7 @@ export class PactService {
 
   async getScoreboard(session: PactSession) {
     const user = await this.repository.requireUser(session.userId);
-    return this.repository.scoreboard(user.courseId, user.cohortId, user.squadId);
+    return this.repository.scoreboard(user.courseId, user.cohortId);
   }
 
   private requireLearnerContentAccess(user: PactUser, content: PactContent) {

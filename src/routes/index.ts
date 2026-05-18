@@ -10,14 +10,17 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, deckImportSchema, deckLockUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, releaseImportSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { agendaUploadSchema, agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, deckImportSchema, deckLockUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, releaseImportSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 import type { ContentType } from "../domain/types.js";
-import { listR2Documents } from "../services/r2Service.js";
+import { listR2Documents, presignR2GetObject, putR2Object } from "../services/r2Service.js";
 import { BugReportService } from "../services/bugReportService.js";
 import { ReleaseImportService } from "../services/releaseImportService.js";
 import { DeckImportService } from "../services/deckImportService.js";
 import { LmsRosterSyncService } from "../services/lmsRosterSyncService.js";
+
+const agendaR2Prefix = "Agendas/";
+const maxAgendaUploadBytes = 25 * 1024 * 1024;
 
 export function createApiRouter(config: AppConfig) {
   const router = Router();
@@ -203,6 +206,19 @@ export function createApiRouter(config: AppConfig) {
   router.get("/dashboard/scoreboard", async (req, res, next) => {
     try {
       res.status(200).json({ entries: await pactService(config).then((service) => service.getScoreboard(requireSession(req))) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/agenda", async (req, res, next) => {
+    try {
+      const session = requireSession(req);
+      const documents = await listR2Documents(
+        r2ConfigOrThrow(config),
+        agendaPrefixFor(session.courseId, session.cohortId)
+      );
+      res.status(200).json({ documents: documents.filter((document) => document.size > 0) });
     } catch (error) {
       next(error);
     }
@@ -472,13 +488,42 @@ export function createApiRouter(config: AppConfig) {
 
   router.get("/admin/r2/documents", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
-      const { r2AccountId, r2Endpoint, r2AccessKeyId, r2SecretAccessKey, r2BucketName } = config;
-      if ((!r2AccountId && !r2Endpoint) || !r2AccessKeyId || !r2SecretAccessKey || !r2BucketName) {
-        throw new AppError(503, "R2_NOT_CONFIGURED", "R2 document storage is not configured");
-      }
       const prefix = typeof req.query.prefix === "string" ? req.query.prefix : undefined;
-      const documents = await listR2Documents({ accountId: r2AccountId, endpoint: r2Endpoint, accessKeyId: r2AccessKeyId, secretAccessKey: r2SecretAccessKey, bucketName: r2BucketName }, prefix);
+      const documents = await listR2Documents(r2ConfigOrThrow(config), prefix);
       res.status(200).json({ documents });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/agenda", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const session = requireSession(req);
+      const input = agendaUploadSchema.parse(req.body);
+      const body = Buffer.from(input.bodyBase64, "base64");
+      if (!body.length) {
+        throw new AppError(400, "AGENDA_UPLOAD_EMPTY", "Agenda upload must include file content");
+      }
+      if (body.length > maxAgendaUploadBytes) {
+        throw new AppError(413, "AGENDA_UPLOAD_TOO_LARGE", "Agenda upload exceeds the 25 MB limit");
+      }
+
+      const r2Config = r2ConfigOrThrow(config);
+      const key = `${agendaPrefixFor(session.courseId, input.cohortId ?? session.cohortId)}${safeFileName(input.fileName)}`;
+      const result = await putR2Object(r2Config, {
+        key,
+        body,
+        contentType: input.contentType || "application/octet-stream"
+      });
+      res.status(201).json({
+        document: {
+          key: result.key,
+          size: body.length,
+          lastModified: new Date().toISOString(),
+          etag: result.etag,
+          downloadUrl: presignR2GetObject(r2Config, result.key, { expiresIn: 3600 })
+        }
+      });
     } catch (error) {
       next(error);
     }
@@ -590,6 +635,41 @@ async function pactRepository(config: AppConfig) {
 
 async function pactService(config: AppConfig) {
   return new PactService(await pactRepository(config), new LmsAgsClient(), new LmsTokenClient(config), config);
+}
+
+function r2ConfigOrThrow(config: AppConfig) {
+  const { r2AccountId, r2Endpoint, r2AccessKeyId, r2SecretAccessKey, r2BucketName } = config;
+  if ((!r2AccountId && !r2Endpoint) || !r2AccessKeyId || !r2SecretAccessKey || !r2BucketName) {
+    throw new AppError(503, "R2_NOT_CONFIGURED", "R2 document storage is not configured");
+  }
+  return {
+    accountId: r2AccountId,
+    endpoint: r2Endpoint,
+    accessKeyId: r2AccessKeyId,
+    secretAccessKey: r2SecretAccessKey,
+    bucketName: r2BucketName
+  };
+}
+
+function agendaPrefixFor(courseId: string, cohortId: string) {
+  return `${agendaR2Prefix}${safePathSegment(courseId)}/${safePathSegment(cohortId)}/`;
+}
+
+function safePathSegment(value: string) {
+  const normalized = value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!normalized) {
+    throw new AppError(400, "INVALID_AGENDA_PATH", "Agenda course or cohort path segment is invalid");
+  }
+  return normalized.slice(0, 120);
+}
+
+function safeFileName(value: string) {
+  const baseName = value.trim().split(/[\\/]/).filter(Boolean).pop() ?? "";
+  const normalized = baseName.replace(/[^a-zA-Z0-9 ._()-]+/g, "-").replace(/\s+/g, " ").trim();
+  if (!normalized || normalized === "." || normalized === "..") {
+    throw new AppError(400, "INVALID_AGENDA_FILENAME", "Agenda file name is invalid");
+  }
+  return normalized.slice(0, 180);
 }
 
 function requireSession(req: Express.Request) {

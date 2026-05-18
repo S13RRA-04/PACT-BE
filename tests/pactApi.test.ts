@@ -1428,6 +1428,109 @@ describe("PACT API", () => {
     }
   });
 
+  it("serves cohort agenda files to learners without admin document access", async () => {
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "agenda-learner",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-agenda"
+    });
+    const r2Config = {
+      ...config,
+      r2Endpoint: "https://test-account.r2.cloudflarestorage.com",
+      r2AccessKeyId: "test-access",
+      r2SecretAccessKey: "test-secret",
+      r2BucketName: "pact"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(`
+      <ListBucketResult>
+        <Contents><Key>Agendas/pact/cohort-agenda/day-1-agenda.pdf</Key><LastModified>2026-05-18T12:00:00.000Z</LastModified><ETag>"agenda"</ETag><Size>128</Size></Contents>
+      </ListBucketResult>
+    `, { status: 200 }));
+
+    try {
+      const response = await request(createApp(r2Config, createLogger(r2Config)))
+        .get("/api/v1/agenda")
+        .set("authorization", `Bearer ${learnerToken}`)
+        .expect(200);
+
+      expect(response.body.documents).toHaveLength(1);
+      expect(response.body.documents[0]).toMatchObject({
+        key: "Agendas/pact/cohort-agenda/day-1-agenda.pdf",
+        size: 128
+      });
+      expect(response.body.documents[0].downloadUrl).toContain("X-Amz-Signature=");
+      const listUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+      expect(listUrl.searchParams.get("prefix")).toBe("Agendas/pact/cohort-agenda/");
+
+      await request(createApp(r2Config, createLogger(r2Config)))
+        .get("/api/v1/admin/r2/documents")
+        .set("authorization", `Bearer ${learnerToken}`)
+        .expect(403);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("allows instructors to upload cohort agendas to the agenda R2 prefix", async () => {
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "agenda-instructor",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-agenda"
+    });
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "agenda-upload-learner",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-agenda"
+    });
+    const r2Config = {
+      ...config,
+      r2Endpoint: "https://test-account.r2.cloudflarestorage.com",
+      r2AccessKeyId: "test-access",
+      r2SecretAccessKey: "test-secret",
+      r2BucketName: "pact"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", {
+      status: 200,
+      headers: { etag: "\"uploaded-agenda\"" }
+    }));
+
+    try {
+      const response = await request(createApp(r2Config, createLogger(r2Config)))
+        .post("/api/v1/admin/agenda")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .send({
+          fileName: "../Day 1 Agenda.pdf",
+          contentType: "application/pdf",
+          bodyBase64: Buffer.from("agenda content").toString("base64")
+        })
+        .expect(201);
+
+      expect(response.body.document).toMatchObject({
+        key: "Agendas/pact/cohort-agenda/Day 1 Agenda.pdf",
+        size: 14,
+        etag: "\"uploaded-agenda\""
+      });
+      const putUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+      expect(putUrl.pathname).toBe("/pact/Agendas/pact/cohort-agenda/Day%201%20Agenda.pdf");
+      expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PUT");
+
+      await request(createApp(r2Config, createLogger(r2Config)))
+        .post("/api/v1/admin/agenda")
+        .set("authorization", `Bearer ${learnerToken}`)
+        .send({
+          fileName: "learner-agenda.pdf",
+          contentType: "application/pdf",
+          bodyBase64: Buffer.from("blocked").toString("base64")
+        })
+        .expect(403);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("records scores and returns scoreboard entries", async () => {
     const token = await new SessionService(config.pactSessionSecret).sign({
       userId: "user-1",
@@ -1449,6 +1552,85 @@ describe("PACT API", () => {
       .expect(200);
 
     expect(response.body.entries[0]).toMatchObject({ userId: "user-1", totalScore: 8, maxScore: 10, progressPercent: 100 });
+  });
+
+  it("returns cohort scoreboard progress across squads", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "scoreboard-cross-squad-current",
+        lmsUserId: "lms-scoreboard-cross-squad-current",
+        name: "Current Learner",
+        role: "learner",
+        courseId: "pact",
+        cohortId: "scoreboard-cross-squad",
+        squadId: "scoreboard-squad-1",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "scoreboard-cross-squad-peer",
+        lmsUserId: "lms-scoreboard-cross-squad-peer",
+        name: "Peer Learner",
+        role: "learner",
+        courseId: "pact",
+        cohortId: "scoreboard-cross-squad",
+        squadId: "scoreboard-squad-2",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactScores").insertMany([
+      {
+        id: "scoreboard-cross-squad-current-score",
+        courseId: "pact",
+        cohortId: "scoreboard-cross-squad",
+        squadId: "scoreboard-squad-1",
+        userId: "scoreboard-cross-squad-current",
+        contentId: "scoreboard-cross-squad-content",
+        contentType: "module",
+        score: 5,
+        maxScore: 10,
+        progressPercent: 50,
+        agsStatus: "not_applicable",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "scoreboard-cross-squad-peer-score",
+        courseId: "pact",
+        cohortId: "scoreboard-cross-squad",
+        squadId: "scoreboard-squad-2",
+        userId: "scoreboard-cross-squad-peer",
+        contentId: "scoreboard-cross-squad-content",
+        contentType: "module",
+        score: 9,
+        maxScore: 10,
+        progressPercent: 90,
+        agsStatus: "not_applicable",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "scoreboard-cross-squad-current",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "scoreboard-cross-squad",
+      squadId: "scoreboard-squad-1"
+    });
+
+    const response = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/dashboard/scoreboard")
+      .set("authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body.entries).toEqual([
+      expect.objectContaining({ userId: "scoreboard-cross-squad-peer", totalScore: 9, progressPercent: 90 }),
+      expect.objectContaining({ userId: "scoreboard-cross-squad-current", totalScore: 5, progressPercent: 50 })
+    ]);
   });
 
   it("keeps explicit partial score submissions internal until assignment progress is complete", async () => {

@@ -1347,9 +1347,8 @@ export class PactRepository {
     };
   }
 
-  async scoreboard(courseId: string, cohortId: string, squadId?: string) {
+  async scoreboard(courseId: string, cohortId: string) {
     const match: Record<string, string> = { courseId, cohortId };
-    if (squadId) match.squadId = squadId;
     const scores = await this.scores().find(match).toArray();
     const users = await this.users().find({ courseId, cohortId }).toArray();
     const squads = await this.squads().find({ courseId, cohortId }).toArray();
