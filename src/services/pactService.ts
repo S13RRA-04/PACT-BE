@@ -396,25 +396,26 @@ export class PactService {
   }
 
   private prepareContentForUser(user: PactUser, content: PactContent): PactContent {
-    if (content.type !== "challenge" || content.mechanics?.kind !== "challenge_path") {
-      return content;
+    const contentWithDeck = this.prepareDeckForUser(user, content);
+    if (contentWithDeck.type !== "challenge" || contentWithDeck.mechanics?.kind !== "challenge_path") {
+      return contentWithDeck;
     }
 
     const learnerView = user.role === "learner";
-    const releases = (content.mechanics.releases ?? []).filter((release) => !learnerView || release.unlocked);
+    const releases = (contentWithDeck.mechanics.releases ?? []).filter((release) => !learnerView || release.unlocked);
     const visibleReleaseIds = new Set(releases.map((release) => release.id));
     const visibleQuestionIds = new Set(releases.flatMap((release) => release.questionIds ?? []));
-    const questions = (content.questions ?? []).filter((question) => {
+    const questions = (contentWithDeck.questions ?? []).filter((question) => {
       if (!question.releaseId) return true;
       return visibleReleaseIds.has(question.releaseId) || visibleQuestionIds.has(question.id);
     });
 
     return {
-      ...content,
+      ...contentWithDeck,
       questionCount: questions.length,
       questions,
       mechanics: {
-        ...content.mechanics,
+        ...contentWithDeck.mechanics,
         releases: releases.map((release) => ({
           ...release,
           files: release.files.map((file) => ({
@@ -426,10 +427,38 @@ export class PactService {
     };
   }
 
+  private prepareDeckForUser(user: PactUser, content: PactContent): PactContent {
+    if (!content.deck) return content;
+    if (user.role === "learner" && !content.deck.unlocked) {
+      return { ...content, deck: undefined };
+    }
+    const instructorGuideFiles = user.role === "learner"
+      ? undefined
+      : content.deck.instructorGuideFiles?.map((file) => ({
+          ...file,
+          ...this.fileUrls(file.key, "pact-instructor-guide")
+        }));
+    return {
+      ...content,
+      deck: {
+        ...content.deck,
+        files: content.deck.files.map((file) => ({
+          ...file,
+          ...this.fileUrls(file.key, "pact-slide-deck")
+        })),
+        instructorGuideFiles
+      }
+    };
+  }
+
   private challengeFileUrls(key: string) {
+    return this.fileUrls(key, "pact-release-file");
+  }
+
+  private fileUrls(key: string, fallbackName: string) {
     const r2Config = this.r2Config();
     if (!r2Config) return {};
-    const fileName = key.split("/").pop() || "pact-release-file";
+    const fileName = key.split("/").pop() || fallbackName;
     return {
       viewUrl: presignR2GetObject(r2Config, key, { expiresIn: 3600 }),
       downloadUrl: presignR2GetObject(r2Config, key, {

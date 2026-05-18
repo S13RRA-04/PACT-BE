@@ -56,7 +56,7 @@ function withCors(response: Response, env: WorkerEnv, request: Request) {
 
   headers.set("vary", "Origin");
   headers.set("access-control-allow-methods", "GET,POST,PATCH,OPTIONS");
-  headers.set("access-control-allow-headers", "authorization,content-type,x-request-id");
+  headers.set("access-control-allow-headers", "authorization,content-type,x-csrf-token,x-request-id");
 
   return new Response(response.body, {
     status: response.status,

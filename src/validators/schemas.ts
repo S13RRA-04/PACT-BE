@@ -171,6 +171,10 @@ export const contentLockUpdateSchema = z.object({
   locked: z.boolean()
 });
 
+export const deckLockUpdateSchema = z.object({
+  unlocked: z.boolean()
+});
+
 export const contentAssignmentUpdateSchema = z.object({
   cohortId: z.string().min(1).nullable()
 });
@@ -262,4 +266,12 @@ export const bugReportCreateSchema = z.object({
   severity: z.enum(["low", "medium", "high", "critical"]).default("medium"),
   pageUrl: z.string().url().max(2048).optional(),
   userAgent: z.string().trim().max(512).optional()
+});
+
+export const releaseImportSchema = z.object({
+  prefix: z.string().trim().min(1).max(1000)
+});
+
+export const deckImportSchema = z.object({
+  prefix: z.string().trim().min(1).max(1000)
 });

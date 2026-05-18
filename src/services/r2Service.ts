@@ -54,8 +54,9 @@ function sigV4Encode(value: string): string {
 
 function buildCanonicalQueryString(params: Record<string, string>): string {
   return Object.entries(params)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${sigV4Encode(k)}=${sigV4Encode(v)}`)
+    .map(([k, v]) => [sigV4Encode(k), sigV4Encode(v)] as const)
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+    .map(([k, v]) => `${k}=${v}`)
     .join("&");
 }
 
@@ -64,9 +65,10 @@ export async function listR2Documents(config: R2Config, prefix?: string): Promis
   const now = new Date();
   const date = isoDate(now);
   const datetime = isoDateTime(now);
+  const normalizedPrefix = prefix ? normalizeR2ObjectKey(config, prefix) : undefined;
 
   const queryParams: Record<string, string> = { "list-type": "2" };
-  if (prefix) queryParams["prefix"] = prefix;
+  if (normalizedPrefix) queryParams["prefix"] = normalizedPrefix;
   const canonicalQuery = buildCanonicalQueryString(queryParams);
 
   const canonicalHeaders = `host:${host}\nx-amz-content-sha256:${EMPTY_HASH}\nx-amz-date:${datetime}\n`;
@@ -115,8 +117,9 @@ export function presignR2GetObject(config: R2Config, key: string, options: {
   const now = options.now ?? new Date();
   const date = isoDate(now);
   const datetime = isoDateTime(now);
+  const normalizedKey = normalizeR2ObjectKey(config, key);
 
-  const encodedKey = key.split("/").map(sigV4Encode).join("/");
+  const encodedKey = normalizedKey.split("/").map(sigV4Encode).join("/");
   const path = `/${config.bucketName}/${encodedKey}`;
 
   const credScope = `${date}/${REGION}/${SERVICE}/aws4_request`;
@@ -145,6 +148,12 @@ function r2Host(config: R2Config) {
   if (config.endpoint) return new URL(config.endpoint).hostname;
   if (config.accountId) return `${config.accountId}.r2.cloudflarestorage.com`;
   throw new Error("R2 endpoint or account ID is required");
+}
+
+function normalizeR2ObjectKey(config: R2Config, key: string) {
+  const normalized = key.replace(/^\/+/, "");
+  const bucketPrefix = `${config.bucketName}/`;
+  return normalized.startsWith(bucketPrefix) ? normalized.slice(bucketPrefix.length) : normalized;
 }
 
 type ParsedContent = { key: string; size: number; lastModified: string; etag?: string };

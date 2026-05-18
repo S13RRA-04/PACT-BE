@@ -10,11 +10,13 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, deckImportSchema, deckLockUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, releaseImportSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 import type { ContentType } from "../domain/types.js";
 import { listR2Documents } from "../services/r2Service.js";
 import { BugReportService } from "../services/bugReportService.js";
+import { ReleaseImportService } from "../services/releaseImportService.js";
+import { DeckImportService } from "../services/deckImportService.js";
 
 export function createApiRouter(config: AppConfig) {
   const router = Router();
@@ -431,6 +433,47 @@ export function createApiRouter(config: AppConfig) {
       res.status(200).json(await repository.updateContentMechanics({
         contentId: req.params.contentId,
         mechanics: contentMechanicsUpdateSchema.parse(req.body).mechanics,
+        session: requireSession(req)
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/content/:contentId/releases/import", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      const input = releaseImportSchema.parse(req.body);
+      res.status(200).json(await new ReleaseImportService(repository, config).importChallengeReleases(
+        requireSession(req),
+        req.params.contentId,
+        input.prefix
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/content/:contentId/decks/import", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      const input = deckImportSchema.parse(req.body);
+      res.status(200).json(await new DeckImportService(repository, config).importDecks(
+        requireSession(req),
+        req.params.contentId,
+        input.prefix
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch("/admin/content/:contentId/deck-lock", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json(await repository.updateContentDeckLock({
+        contentId: req.params.contentId,
+        unlocked: deckLockUpdateSchema.parse(req.body).unlocked,
         session: requireSession(req)
       }));
     } catch (error) {

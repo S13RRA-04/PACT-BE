@@ -41,10 +41,33 @@ export type PactContent = {
   questionCount?: number;
   questions?: PactQuestion[];
   mechanics?: ContentMechanics;
+  deck?: ContentDeck;
   status: ContentStatus;
   locked?: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ContentDeck = {
+  unlocked: boolean;
+  prefix?: string;
+  importedAt?: string;
+  files: Array<{
+    key: string;
+    title?: string;
+    description?: string;
+    contentType?: string;
+    viewUrl?: string;
+    downloadUrl?: string;
+  }>;
+  instructorGuideFiles?: Array<{
+    key: string;
+    title?: string;
+    description?: string;
+    contentType?: string;
+    viewUrl?: string;
+    downloadUrl?: string;
+  }>;
 };
 
 export type PactAgsContext = {

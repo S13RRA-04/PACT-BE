@@ -1059,6 +1059,221 @@ describe("PACT API", () => {
       .expect(403);
   });
 
+  it("atomically imports challenge release files from R2 into content mechanics", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("release-import-challenge", "cohort-release-import", "learner", "draft", "challenge", true),
+      mechanics: {
+        kind: "challenge_path",
+        title: "Brokered Exit",
+        prompt: "Review released case files.",
+        releases: [
+          {
+            id: "release_R0",
+            title: "Existing Release Zero",
+            summary: "Preserved release metadata.",
+            releaseLabel: "R0",
+            unlocked: true,
+            files: [{ key: "old/release_R0/old.txt", title: "Old" }],
+            questionIds: ["release-import-q0"]
+          }
+        ],
+        paths: [{ id: "develop", label: "Develop", detail: "Build the case.", score: 100 }]
+      },
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "release-import-instructor",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-release-import"
+    });
+    const r2Config = {
+      ...config,
+      r2Endpoint: "https://test-account.r2.cloudflarestorage.com",
+      r2AccessKeyId: "test-access",
+      r2SecretAccessKey: "test-secret",
+      r2BucketName: "pact"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(`
+      <ListBucketResult>
+        <Contents><Key>scenarios/brokered-exit/Student/Case Files/release_R0/brief.docx</Key><LastModified>2026-05-18T12:00:00.000Z</LastModified><ETag>"etag-r0"</ETag><Size>128</Size></Contents>
+        <Contents><Key>scenarios/brokered-exit/Student/Case Files/release_R1/email.eml</Key><LastModified>2026-05-18T12:05:00.000Z</LastModified><ETag>"etag-r1"</ETag><Size>256</Size></Contents>
+        <Contents><Key>scenarios/brokered-exit/Student/Case Files/release_R1/empty.txt</Key><LastModified>2026-05-18T12:06:00.000Z</LastModified><ETag>"etag-empty"</ETag><Size>0</Size></Contents>
+      </ListBucketResult>
+    `, { status: 200 }));
+
+    try {
+      const response = await request(createApp(r2Config, createLogger(r2Config)))
+        .post("/api/v1/admin/content/release-import-challenge/releases/import")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .send({ prefix: "pact/scenarios/brokered-exit/Student/Case Files/" })
+        .expect(200);
+
+      expect(response.body).toMatchObject({ imported: 2, releases: 2 });
+      expect(response.body.content.mechanics.releases).toEqual([
+        expect.objectContaining({
+          id: "release_R0",
+          title: "Existing Release Zero",
+          summary: "Preserved release metadata.",
+          unlocked: true,
+          questionIds: ["release-import-q0"],
+          files: [expect.objectContaining({ key: "scenarios/brokered-exit/Student/Case Files/release_R0/brief.docx", contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })]
+        }),
+        expect.objectContaining({
+          id: "release_R1",
+          title: "Release R1",
+          unlocked: false,
+          files: [expect.objectContaining({ key: "scenarios/brokered-exit/Student/Case Files/release_R1/email.eml", contentType: "message/rfc822" })]
+        })
+      ]);
+      const listUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+      expect(listUrl.searchParams.get("prefix")).toBe("scenarios/brokered-exit/Student/Case Files/");
+
+      const persisted = await db.collection("test_pactContent").findOne({ id: "release-import-challenge" });
+      expect(persisted?.mechanics).toMatchObject(response.body.content.mechanics);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("does not modify challenge mechanics when a release import finds no files", async () => {
+    const db = await getMongoDb(config);
+    const originalMechanics = {
+      kind: "challenge_path",
+      title: "Brokered Exit Empty Import",
+      prompt: "Keep the existing mechanics.",
+      releases: [
+        {
+          id: "release_R0",
+          title: "Release R0",
+          summary: "Existing file.",
+          unlocked: true,
+          files: [{ key: "existing/release_R0/brief.txt", title: "Brief" }]
+        }
+      ],
+      paths: [{ id: "develop", label: "Develop", detail: "Build the case.", score: 100 }]
+    };
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("release-import-empty-challenge", "cohort-release-import", "learner", "draft", "challenge", true),
+      mechanics: originalMechanics
+    });
+
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "release-import-empty-instructor",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-release-import"
+    });
+    const r2Config = {
+      ...config,
+      r2Endpoint: "https://test-account.r2.cloudflarestorage.com",
+      r2AccessKeyId: "test-access",
+      r2SecretAccessKey: "test-secret",
+      r2BucketName: "pact"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("<ListBucketResult />", { status: 200 }));
+
+    try {
+      await request(createApp(r2Config, createLogger(r2Config)))
+        .post("/api/v1/admin/content/release-import-empty-challenge/releases/import")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .send({ prefix: "pact/scenarios/brokered-exit/Student/Case Files/" })
+        .expect(404);
+
+      const persisted = await db.collection("test_pactContent").findOne({ id: "release-import-empty-challenge" });
+      expect(persisted?.mechanics).toEqual(originalMechanics);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("imports slide decks and only exposes them to learners after instructor unlock", async () => {
+    const db = await getMongoDb(config);
+    await db.collection("test_pactUsers").insertOne({
+      id: "deck-learner",
+      lmsUserId: "lms-deck-learner",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-deck",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    await db.collection("test_pactContent").insertOne(publishedContent("deck-module", "cohort-deck", "learner", "published", "module", false));
+
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "deck-instructor",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-deck"
+    });
+    const learnerToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "deck-learner",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-deck"
+    });
+    const r2Config = {
+      ...config,
+      r2Endpoint: "https://test-account.r2.cloudflarestorage.com",
+      r2AccessKeyId: "test-access",
+      r2SecretAccessKey: "test-secret",
+      r2BucketName: "pact"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(`
+      <ListBucketResult>
+        <Contents><Key>decks/Attribution/Attribution 101.pptx</Key><LastModified>2026-05-18T12:00:00.000Z</LastModified><ETag>"deck-pptx"</ETag><Size>128</Size></Contents>
+        <Contents><Key>decks/Attribution/Attribution quick reference.pdf</Key><LastModified>2026-05-18T12:05:00.000Z</LastModified><ETag>"deck-pdf"</ETag><Size>256</Size></Contents>
+        <Contents><Key>decks/Attribution/day4_lecture1_lesson_plan.docx</Key><LastModified>2026-05-18T12:06:00.000Z</LastModified><ETag>"deck-guide"</ETag><Size>512</Size></Contents>
+      </ListBucketResult>
+    `, { status: 200 }));
+
+    try {
+      const importResponse = await request(createApp(r2Config, createLogger(r2Config)))
+        .post("/api/v1/admin/content/deck-module/decks/import")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .send({ prefix: "pact/decks/Attribution/" })
+        .expect(200);
+
+      expect(importResponse.body).toMatchObject({ imported: 2 });
+      expect(importResponse.body.content.deck).toMatchObject({ unlocked: false, prefix: "pact/decks/Attribution/" });
+      expect(importResponse.body.content.deck.files.map((file: { key: string }) => file.key)).toEqual([
+        "decks/Attribution/Attribution 101.pptx",
+        "decks/Attribution/Attribution quick reference.pdf"
+      ]);
+      expect(importResponse.body.content.deck.instructorGuideFiles.map((file: { key: string }) => file.key)).toEqual([
+        "decks/Attribution/day4_lecture1_lesson_plan.docx"
+      ]);
+
+      const lockedLearnerResponse = await request(createApp(r2Config, createLogger(r2Config)))
+        .get("/api/v1/content")
+        .set("authorization", `Bearer ${learnerToken}`)
+        .expect(200);
+      expect(lockedLearnerResponse.body.find((item: { id: string }) => item.id === "deck-module").deck).toBeUndefined();
+
+      await request(createApp(r2Config, createLogger(r2Config)))
+        .patch("/api/v1/admin/content/deck-module/deck-lock")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .send({ unlocked: true })
+        .expect(200);
+
+      const unlockedLearnerResponse = await request(createApp(r2Config, createLogger(r2Config)))
+        .get("/api/v1/content")
+        .set("authorization", `Bearer ${learnerToken}`)
+        .expect(200);
+      const deckModule = unlockedLearnerResponse.body.find((item: { id: string }) => item.id === "deck-module");
+      expect(deckModule.deck.files).toHaveLength(2);
+      expect(deckModule.deck.instructorGuideFiles).toBeUndefined();
+      expect(deckModule.deck.files[0].viewUrl).toContain("X-Amz-Signature=");
+      expect(deckModule.deck.files[0].downloadUrl).toContain("response-content-disposition=");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("records scores and returns scoreboard entries", async () => {
     const token = await new SessionService(config.pactSessionSecret).sign({
       userId: "user-1",

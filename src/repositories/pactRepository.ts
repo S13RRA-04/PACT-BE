@@ -508,6 +508,28 @@ export class PactRepository {
     return { ...content, locked: input.locked, updatedAt };
   }
 
+  async updateContentDeck(input: { contentId: string; deck: PactContent["deck"]; session: { role: PactRole; courseId: string; cohortId: string } }) {
+    const content = await this.requireContent(input.contentId);
+    if (content.courseId !== input.session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this course");
+    }
+    const updatedAt = new Date().toISOString();
+    await this.content().updateOne({ id: input.contentId, courseId: input.session.courseId }, { $set: { deck: input.deck, updatedAt } });
+    return { ...content, deck: input.deck, updatedAt };
+  }
+
+  async updateContentDeckLock(input: { contentId: string; unlocked: boolean; session: { role: PactRole; courseId: string; cohortId: string } }) {
+    const content = await this.requireContent(input.contentId);
+    if (content.courseId !== input.session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is not assigned to this course");
+    }
+    const deck = content.deck ?? { unlocked: false, files: [] };
+    const updatedAt = new Date().toISOString();
+    const nextDeck = { ...deck, unlocked: input.unlocked };
+    await this.content().updateOne({ id: input.contentId, courseId: input.session.courseId }, { $set: { deck: nextDeck, updatedAt } });
+    return { ...content, deck: nextDeck, updatedAt };
+  }
+
   async updateContentAssignment(input: { contentId: string; cohortId: string | null; session: { role: PactRole; courseId: string; cohortId: string } }) {
     const content = await this.requireContent(input.contentId);
     if (content.courseId !== input.session.courseId) {
@@ -547,6 +569,22 @@ export class PactRepository {
       : { $unset: { mechanics: 1 as const }, $set: { updatedAt } };
     await this.content().updateOne({ id: input.contentId }, update);
     return input.mechanics ? { ...content, mechanics: input.mechanics, updatedAt } : { ...content, mechanics: undefined, updatedAt };
+  }
+
+  async importContentReleaseMechanics(input: { contentId: string; mechanics: ContentMechanics; session: { role: PactRole; courseId: string; cohortId: string } }) {
+    const content = await this.requireContent(input.contentId);
+    if (content.courseId !== input.session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content is outside this course");
+    }
+    if (content.type !== "challenge" || input.mechanics.kind !== "challenge_path") {
+      throw new AppError(400, "MECHANICS_TYPE_MISMATCH", "Release imports are only supported for challenge content");
+    }
+    const updatedAt = new Date().toISOString();
+    await this.content().updateOne(
+      { id: input.contentId, courseId: input.session.courseId, type: "challenge" },
+      { $set: { mechanics: input.mechanics, updatedAt } }
+    );
+    return { ...content, mechanics: input.mechanics, updatedAt };
   }
 
   async upsertScore(input: {
