@@ -1,7 +1,8 @@
 param(
   [string]$EnvFile = ".env.pact-origin-runtime",
   [int]$Port = 4200,
-  [int]$HealthTimeoutSeconds = 45
+  [int]$HealthTimeoutSeconds = 45,
+  [string]$ServiceName = "CETU-PACT2-API-Origin"
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,12 +40,12 @@ function Stop-PortListeners([int]$Port) {
   throw "Port $Port is still in use after stopping existing PACT origin listeners."
 }
 
-function Wait-OriginHealth([int]$Port, [int]$TimeoutSeconds, [System.Diagnostics.Process]$StartedProcess) {
+function Wait-OriginHealth([int]$Port, [int]$TimeoutSeconds, [System.Diagnostics.Process]$StartedProcess = $null) {
   $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
   $healthUrl = "http://127.0.0.1:$Port/health"
 
   do {
-    if ($StartedProcess.HasExited) {
+    if ($StartedProcess -and $StartedProcess.HasExited) {
       throw "PACT production origin startup process exited with code $($StartedProcess.ExitCode). Check $errLog."
     }
 
@@ -64,6 +65,20 @@ function Wait-OriginHealth([int]$Port, [int]$TimeoutSeconds, [System.Diagnostics
 
 if (-not (Test-Path -LiteralPath $EnvFile)) {
   throw "Missing $EnvFile."
+}
+
+$service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($service) {
+  Write-Host "Restarting PACT production origin service $ServiceName."
+  if ($service.Status -eq "Running") {
+    Restart-Service -Name $ServiceName -Force
+  } elseif ($service.Status -eq "Paused") {
+    Resume-Service -Name $ServiceName
+  } else {
+    Start-Service -Name $ServiceName
+  }
+  Wait-OriginHealth -Port $Port -TimeoutSeconds $HealthTimeoutSeconds
+  exit 0
 }
 
 Stop-PortListeners -Port $Port

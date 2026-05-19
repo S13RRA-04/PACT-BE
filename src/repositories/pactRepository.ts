@@ -730,6 +730,11 @@ export class PactRepository {
     return this.scores().findOne({ userId, contentId });
   }
 
+  async updateContentLineItemUrl(contentId: string, lineItemUrl: string) {
+    const updatedAt = new Date().toISOString();
+    await this.content().updateOne({ id: contentId }, { $set: { lineItemUrl, updatedAt } });
+  }
+
   async upsertAgsContext(input: Omit<PactAgsContext, "id" | "createdAt" | "updatedAt">) {
     const now = new Date().toISOString();
     const existing = await this.agsContexts().findOne({
@@ -1411,6 +1416,35 @@ export class PactRepository {
       averageProgressPercent,
       learners: learnerSummaries
     };
+  }
+
+  async listGradeScores(courseId: string, cohortId?: string) {
+    const scoreFilter: Record<string, string> = { courseId };
+    if (cohortId) scoreFilter.cohortId = cohortId;
+    const [scores, users, squads, content] = await Promise.all([
+      this.scores().find(scoreFilter).toArray(),
+      this.users().find({ courseId }).toArray(),
+      this.squads().find({ courseId }).toArray(),
+      this.content().find({ courseId }).toArray()
+    ]);
+    const userMap = new Map(users.map((user) => [user.id, user]));
+    const contentMap = new Map(content.map((item) => [item.id, item]));
+    return scores.map((score) => {
+      const user = userMap.get(score.userId);
+      const contentItem = contentMap.get(score.contentId);
+      return {
+        ...score,
+        userName: user?.name,
+        userEmail: user?.email,
+        squadNumber: user ? squadNumberForUser(user, squads) : undefined,
+        contentTitle: contentItem?.title,
+        day: contentItem?.day
+      };
+    });
+  }
+
+  async listUsersForSquad(squadId: string, courseId: string) {
+    return this.users().find({ squadId, courseId }).toArray();
   }
 
   async scoreboard(courseId: string, cohortId: string) {

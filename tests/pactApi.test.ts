@@ -2394,7 +2394,10 @@ describe("PACT API", () => {
       cohortId: "cohort-a",
       userId: "ags-durable-operator",
       lineItemsUrl: "http://lms.example.test/api/v1/lti/ags/lineitems",
-      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      scopes: [
+        "https://purl.imsglobal.org/spec/lti-ags/scope/score",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
+      ],
       createdAt: now,
       updatedAt: now
     });
@@ -2474,7 +2477,10 @@ describe("PACT API", () => {
       courseId: "pact-ags-manual",
       cohortId: "cohort-a",
       userId: "ags-manual-instructor",
-      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      scopes: [
+        "https://purl.imsglobal.org/spec/lti-ags/scope/score",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
+      ],
       createdAt: now,
       updatedAt: now
     });
@@ -2756,8 +2762,11 @@ describe("PACT API", () => {
       courseId: "pact-ags-stale-score",
       cohortId: "cohort-a",
       userId: "ags-stale-score-instructor",
-      lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/stale-score-lineitem",
-      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      lineItemsUrl: "http://lms.example.test/api/v1/lti/ags/lineitems",
+      scopes: [
+        "https://purl.imsglobal.org/spec/lti-ags/scope/score",
+        "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem"
+      ],
       createdAt: now,
       updatedAt: now
     });
@@ -2796,6 +2805,8 @@ describe("PACT API", () => {
     });
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse({ access_token: "stale-score-ags-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ id: "stale-score-created-lineitem", label: "Day 1 Module", scoreMaximum: 10, resourceId: "ags-stale-score-content", tag: "module" }, 201))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     try {
@@ -2809,8 +2820,12 @@ describe("PACT API", () => {
         userId: "ags-stale-score-learner",
         contentId: "ags-stale-score-content",
         status: "published"
-      })).resolves.toMatchObject({ score: 6, maxScore: 10 });
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      })).resolves.toMatchObject({
+        score: 6,
+        maxScore: 10,
+        lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/stale-score-created-lineitem"
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(4);
     } finally {
       fetchMock.mockRestore();
     }
@@ -3709,7 +3724,13 @@ describe("PACT API", () => {
       .find({ scope: "squad", squadId: "squad-progress-1" })
       .toArray();
     expect(squadProgressRecords).toHaveLength(2);
-    expect(await db.collection("test_pactScores").countDocuments({ contentId: "squad-progress-workshop" })).toBe(0);
+    const memberScores = await db.collection("test_pactScores")
+      .find({ contentId: "squad-progress-workshop" })
+      .sort({ userId: 1 })
+      .toArray();
+    expect(memberScores).toHaveLength(2);
+    expect(memberScores.map((score) => score.userId)).toEqual(["squad-progress-a", "squad-progress-b"]);
+    expect(memberScores.every((score) => score.agsStatus === "not_applicable")).toBe(true);
 
     const listResponse = await request(createApp(config, createLogger(config)))
       .get("/api/v1/content/squad-progress")

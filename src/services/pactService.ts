@@ -353,6 +353,7 @@ export class PactService {
     for (const attempt of notApplicableAttempts) {
       const key = agsBackfillKey(attempt);
       if (seen.has(key)) {
+        result.scanned += 1;
         this.recordAgsBackfillSkip(result, "duplicateCandidate");
         continue;
       }
@@ -443,10 +444,36 @@ export class PactService {
       maxScore
     });
 
+    if (assignmentComplete && user.squadId) {
+      await this.propagateSquadScoreToMembers(user, content, { score: input.score, maxScore, progressPercent: input.progressPercent });
+    }
+
     return {
       ...progress,
       agsStatus: "not_applicable" as const
     };
+  }
+
+  private async propagateSquadScoreToMembers(
+    squadMember: PactUser,
+    content: PactContent,
+    input: { score: number; maxScore: number; progressPercent: number }
+  ) {
+    const members = await this.repository.listUsersForSquad(squadMember.squadId!, squadMember.courseId);
+    await Promise.all(members.map(async (member) => {
+      const existingScore = await this.repository.getScoreForUserContent(member.id, content.id);
+      if (isSamePublishedScore(existingScore, input)) return;
+      const agsStatus = await this.enqueueFinalAgsPublish(member, content, { score: input.score, progressPercent: input.progressPercent }, input.maxScore);
+      await this.repository.upsertScore({
+        user: member,
+        contentId: content.id,
+        contentType: content.type,
+        score: input.score,
+        maxScore: input.maxScore,
+        progressPercent: input.progressPercent,
+        agsStatus
+      });
+    }));
   }
 
   async updateContentProgress(session: PactSession, contentId: string, input: {
@@ -543,6 +570,11 @@ export class PactService {
   async getScoreboard(session: PactSession) {
     const user = await this.repository.requireUser(session.userId);
     return this.repository.scoreboard(user.courseId, user.cohortId);
+  }
+
+  async getGrades(session: PactSession, filters: { cohortId?: string } = {}) {
+    const user = await this.repository.requireUser(session.userId);
+    return this.repository.listGradeScores(user.courseId, filters.cohortId);
   }
 
   private requireLearnerContentAccess(user: PactUser, content: PactContent) {
@@ -932,10 +964,16 @@ export class PactService {
     maxScore: number,
     options: { lineItemUrl?: string; tokenUser?: PactUser } = {}
   ) {
-    const lineItemUrl = options.lineItemUrl ?? await this.resolveLineItemUrl(user, content);
-    const accessToken = lineItemUrl
-      ? input.agsAccessToken ?? await this.acquireAgsAccessToken(options.tokenUser ?? user)
-      : input.agsAccessToken;
+    const tokenUser = options.tokenUser ?? user;
+    let accessToken = input.agsAccessToken;
+    let lineItemUrl = options.lineItemUrl ?? await this.resolveLineItemUrl(user, content);
+    if (!accessToken && (lineItemUrl || await this.hasWritableAgsContext(tokenUser))) {
+      const scopes = lineItemUrl ? [AGS_SCORE_SCOPE] : [AGS_SCORE_SCOPE, AGS_LINE_ITEM_SCOPE];
+      accessToken = await this.acquireAgsAccessToken(tokenUser, scopes);
+    }
+    if (!lineItemUrl && accessToken) {
+      lineItemUrl = await this.resolveOrCreateLineItemUrl(tokenUser, content, maxScore, accessToken);
+    }
     return this.ags.publishScore({
       lineItemUrl,
       accessToken,
@@ -967,15 +1005,16 @@ export class PactService {
     return effectiveAttempts;
   }
 
-  private async acquireAgsAccessToken(user: PactUser) {
+  private async acquireAgsAccessToken(user: PactUser, scopes = [AGS_SCORE_SCOPE]) {
     const context = await this.resolveAgsContext(user);
     if (!context) {
       throw new AppError(502, "AGS_CONTEXT_MISSING", "No AGS launch context is available for this course/cohort");
     }
-    if (!context.scopes.includes(AGS_SCORE_SCOPE)) {
-      throw new AppError(403, "AGS_SCOPE_MISSING", "LTI launch did not grant AGS score scope");
+    const missingScope = scopes.find((scope) => !context.scopes.includes(scope));
+    if (missingScope) {
+      throw new AppError(403, "AGS_SCOPE_MISSING", "LTI launch did not grant the required AGS scope");
     }
-    const token = await this.tokens.getAgsAccessToken([AGS_SCORE_SCOPE]);
+    const token = await this.tokens.getAgsAccessToken(scopes);
     return token.accessToken;
   }
 
@@ -992,6 +1031,11 @@ export class PactService {
     return Boolean(context?.scopes.includes(AGS_SCORE_SCOPE));
   }
 
+  private async hasWritableAgsContext(user: PactUser) {
+    const context = await this.resolveAgsContext(user);
+    return Boolean(context?.lineItemsUrl && context.scopes.includes(AGS_SCORE_SCOPE) && context.scopes.includes(AGS_LINE_ITEM_SCOPE));
+  }
+
   private async resolveAgsContext(user: PactUser) {
     return await this.repository.getAgsContextForUser({
       userId: user.id,
@@ -1001,6 +1045,30 @@ export class PactService {
       courseId: user.courseId,
       cohortId: user.cohortId
     });
+  }
+
+  private async resolveOrCreateLineItemUrl(user: PactUser, content: PactContent, maxScore: number, accessToken: string) {
+    const existingLineItemUrl = await this.resolveLineItemUrl(user, content);
+    if (existingLineItemUrl) {
+      return existingLineItemUrl;
+    }
+
+    const context = await this.resolveAgsContext(user);
+    if (!context?.lineItemsUrl || !context.scopes.includes(AGS_LINE_ITEM_SCOPE)) {
+      return undefined;
+    }
+
+    const lineItemUrl = await this.ags.findOrCreateLineItem({
+      lineItemsUrl: context.lineItemsUrl,
+      accessToken,
+      label: content.lmsLabel ?? content.title,
+      scoreMaximum: maxScore,
+      resourceId: content.id,
+      tag: content.type
+    });
+    await this.repository.updateContentLineItemUrl(content.id, lineItemUrl);
+    content.lineItemUrl = lineItemUrl;
+    return lineItemUrl;
   }
 
   private async recordSkippedDuplicateAgsAttempt(
@@ -1142,6 +1210,16 @@ function sameSet(left: string[], right: string[]) {
   return left.length === right.length && left.every((value) => right.includes(value));
 }
 
+function isSamePublishedScore(
+  existing: { score: number; maxScore: number; progressPercent: number; agsStatus: string } | null,
+  next: { score: number; maxScore: number; progressPercent: number }
+) {
+  return existing?.agsStatus === "published"
+    && existing.score === next.score
+    && existing.maxScore === next.maxScore
+    && existing.progressPercent === next.progressPercent;
+}
+
 function buildAssessmentTimingComment(content: PactContent, progress: PactContentProgress | undefined, submittedAt: string) {
   if (content.type !== "assessment") return undefined;
   if (content.mechanics?.kind === "readiness_checklist" && content.mechanics.timing?.enabled === false) return undefined;
@@ -1178,6 +1256,7 @@ function assessmentStartedAt(progress: PactContentProgress | undefined) {
 }
 
 const AGS_SCORE_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/score";
+const AGS_LINE_ITEM_SCOPE = "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem";
 
 function shouldSchedulePersistentRetry(config: AppConfig, retryCount: number) {
   return config.agsAutoRetryEnabled && retryCount < config.agsAutoRetryMaxAttempts;

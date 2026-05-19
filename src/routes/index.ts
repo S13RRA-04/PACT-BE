@@ -213,6 +213,15 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.get("/admin/grades", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const cohortId = typeof req.query.cohortId === "string" ? req.query.cohortId : undefined;
+      res.status(200).json({ entries: await pactService(config).then((service) => service.getGrades(requireSession(req), { cohortId })) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/dashboard/scoreboard", async (req, res, next) => {
     try {
       res.status(200).json({ entries: await pactService(config).then((service) => service.getScoreboard(requireSession(req))) });

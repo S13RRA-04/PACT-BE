@@ -67,6 +67,8 @@ For production deployments, prefer the guarded restart path instead of starting 
 npm run deploy:worker:production
 ```
 
+On the current low-cost production topology, Cloudflare is only the public routing layer. The backend origin and tunnel still need to run on the Windows host. `deploy:worker:production` restarts the `CETU-PACT2-API-Origin` Windows service when it exists, verifies `http://127.0.0.1:4200/health`, and falls back to a direct local origin process only on hosts where that service has not been installed. The production tunnel service is `CETU-PACT2-API-Tunnel`.
+
 For staging hosts that must recover before interactive logon, install the origin and tunnel as real Windows services through NSSM:
 
 ```powershell
