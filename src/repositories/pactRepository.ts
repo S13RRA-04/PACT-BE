@@ -143,8 +143,8 @@ export class PactRepository {
   async listChallengeSubmissionsForReview(input: { contentId: string; session: { role: PactRole; courseId: string; cohortId: string } }) {
     const content = await this.content().findOne({ id: input.contentId, courseId: input.session.courseId });
     if (!content) throw new AppError(404, "CONTENT_NOT_FOUND", "Content was not found");
-    if (content.type !== "challenge" || content.mechanics?.kind !== "challenge_path") {
-      throw new AppError(400, "CONTENT_NOT_REVIEWABLE", "Only challenge-path content has synthesis submissions");
+    if (!isReviewableSubmissionContent(content)) {
+      throw new AppError(400, "CONTENT_NOT_REVIEWABLE", "Only challenge synthesis or workshop response content can be reviewed");
     }
 
     const cohortFilter = content.cohortId ? { cohortId: content.cohortId } : {};
@@ -156,16 +156,19 @@ export class PactRepository {
       this.squads().find({ courseId: input.session.courseId }).toArray(),
       this.contentProgress().find({ courseId: input.session.courseId, contentId: input.contentId }).toArray()
     ]);
+    const reviewPrompts = reviewPromptsForContent(content, progress);
+    if (!reviewPrompts.length) {
+      throw new AppError(400, "CONTENT_NOT_REVIEWABLE", "Only challenge synthesis or workshop response content can be reviewed");
+    }
     const userProgress = progress.filter((item) => item.scope === "user" || !item.scope);
     const squadProgress = progress.filter((item) => item.scope === "squad" && item.squadId);
     const progressByUserId = new Map(userProgress.map((item) => [item.userId, item]));
     const progressBySquadId = new Map(squadProgress.map((item) => [item.squadId, item]));
-    const prompts = content.mechanics.synthesisPrompts ?? [];
     const submissions = users.map((user) => {
       const progressRecord = progressBySquadId.get(user.squadId ?? "") ?? progressByUserId.get(user.id);
-      const synthesisResponses = synthesisResponsesFromState(progressRecord?.mechanicsState);
-      const completedPromptIds = prompts
-        .filter((prompt) => (synthesisResponses[prompt.id] ?? "").trim().length > 0)
+      const reviewResponses = reviewResponsesForProgress(content, progressRecord);
+      const completedPromptIds = reviewPrompts
+        .filter((prompt) => (reviewResponses[prompt.id] ?? "").trim().length > 0)
         .map((prompt) => prompt.id);
 
       return {
@@ -179,12 +182,12 @@ export class PactRepository {
         status: progressRecord?.status ?? "not_started",
         progressPercent: progressRecord?.progressPercent ?? 0,
         completedPromptIds,
-        responses: prompts.map((prompt) => ({
+        responses: reviewPrompts.map((prompt) => ({
           promptId: prompt.id,
           label: prompt.label,
           prompt: prompt.prompt,
           required: prompt.required !== false,
-          response: synthesisResponses[prompt.id] ?? ""
+          response: reviewResponses[prompt.id] ?? ""
         })),
         updatedAt: progressRecord?.updatedAt,
         submittedAt: progressRecord?.submittedAt
@@ -198,7 +201,7 @@ export class PactRepository {
         title: content.title,
         cohortId: content.cohortId ?? null
       },
-      prompts: prompts.map((prompt) => ({
+      prompts: reviewPrompts.map((prompt) => ({
         id: prompt.id,
         label: prompt.label,
         prompt: prompt.prompt,
@@ -1196,6 +1199,17 @@ export class PactRepository {
     });
   }
 
+  async countQuestionAttemptsForSquadContentQuestion(input: { user: PactUser; content: PactContent; questionId: string }) {
+    if (!input.user.squadId) return 0;
+    return this.questionAttempts().countDocuments({
+      courseId: input.user.courseId,
+      cohortId: input.user.cohortId,
+      squadId: input.user.squadId,
+      contentId: input.content.id,
+      questionId: input.questionId
+    });
+  }
+
   async getQuestionAttemptForCourse(attemptId: string, courseId: string) {
     return this.questionAttempts().findOne({ id: attemptId, courseId });
   }
@@ -1338,6 +1352,27 @@ export class PactRepository {
     const attempts = await this.questionAttempts()
       .find({
         userId: input.user.id,
+        contentId: input.content.id,
+        questionId: { $in: (input.content.questions ?? []).map((question) => question.id) }
+      })
+      .sort({ submittedAt: -1, attemptNumber: -1 })
+      .toArray();
+    const latestByQuestionId = new Map<string, PactQuestionAttempt>();
+    for (const attempt of attempts) {
+      if (!latestByQuestionId.has(attempt.questionId)) {
+        latestByQuestionId.set(attempt.questionId, attempt);
+      }
+    }
+    return latestByQuestionId;
+  }
+
+  async listLatestQuestionAttemptsForSquadContent(input: { user: PactUser; content: PactContent }) {
+    if (!input.user.squadId) return new Map<string, PactQuestionAttempt>();
+    const attempts = await this.questionAttempts()
+      .find({
+        courseId: input.user.courseId,
+        cohortId: input.user.cohortId,
+        squadId: input.user.squadId,
         contentId: input.content.id,
         questionId: { $in: (input.content.questions ?? []).map((question) => question.id) }
       })
@@ -1548,6 +1583,62 @@ function synthesisResponsesFromState(mechanicsState: PactMechanicsState | undefi
     Object.entries(value)
       .filter((entry): entry is [string, string] => typeof entry[1] === "string")
   );
+}
+
+function isReviewableSubmissionContent(content: PactContent) {
+  return (content.type === "challenge" && content.mechanics?.kind === "challenge_path") || content.type === "workshop";
+}
+
+function reviewPromptsForContent(content: PactContent, progress: PactContentProgress[] = []) {
+  if (content.type === "challenge" && content.mechanics?.kind === "challenge_path") {
+    return (content.mechanics.synthesisPrompts ?? []).map((prompt) => ({
+      id: prompt.id,
+      label: prompt.label,
+      prompt: prompt.prompt,
+      required: prompt.required !== false
+    }));
+  }
+  if (content.type === "workshop") {
+    if (content.questions?.length) {
+      return content.questions.map((question) => ({
+        id: question.id,
+        label: question.topic || question.id,
+        prompt: typeof question.stem?.prompt === "string" ? question.stem.prompt : question.topic || question.id,
+        required: question.scoring?.optional !== true
+      }));
+    }
+    return workshopPromptsFromProgress(progress);
+  }
+  return [];
+}
+
+function reviewResponsesForProgress(content: PactContent, progress: PactContentProgress | undefined): Record<string, string> {
+  if (!progress) return {};
+  if (content.type === "challenge" && content.mechanics?.kind === "challenge_path") {
+    return synthesisResponsesFromState(progress.mechanicsState);
+  }
+  if (content.type !== "workshop") return {};
+  const answers = progress.answers ?? {};
+  const prompts = reviewPromptsForContent(content, [progress]);
+  return Object.fromEntries(prompts.map((prompt) => [prompt.id, reviewAnswerToText(answers[prompt.id])]));
+}
+
+function workshopPromptsFromProgress(progress: PactContentProgress[]) {
+  const answerIds = Array.from(new Set(progress.flatMap((item) => Object.keys(item.answers ?? {})))).sort();
+  return answerIds.map((id) => ({
+    id,
+    label: id,
+    prompt: id,
+    required: true
+  }));
+}
+
+function reviewAnswerToText(answer: PactAnswerValue | undefined) {
+  if (answer === undefined) return "";
+  if (typeof answer === "string") return answer;
+  if (typeof answer === "boolean") return answer ? "true" : "false";
+  if (Array.isArray(answer)) return answer.join(", ");
+  return Object.entries(answer).map(([key, value]) => `${key}: ${value}`).join("\n");
 }
 
 function mechanicsMatchesContentType(type: ContentType, kind: ContentMechanics["kind"]) {

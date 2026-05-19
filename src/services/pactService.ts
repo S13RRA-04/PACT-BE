@@ -54,7 +54,11 @@ export class PactService {
     }
     const content = await this.repository.listContentFor(user, session.contentType, session.contentId);
     const squadContent = content.filter((item) => isSquadCompletionContent(item));
-    return this.repository.listProgressForSquad(user, squadContent.map((item) => item.id));
+    const progress = await this.repository.listProgressForSquad(user, squadContent.map((item) => item.id));
+    return Promise.all(progress.map((item) => {
+      const itemContent = squadContent.find((contentItem) => contentItem.id === item.contentId);
+      return itemContent ? this.hydrateSquadProgressFromAttempts(user, itemContent, item) : item;
+    }));
   }
 
   async getSquadContentProgressForContent(session: PactSession, contentId: string) {
@@ -65,7 +69,7 @@ export class PactService {
     return {
       contentId: content.id,
       squadId: user.squadId,
-      progress: progress[0] ?? null
+      progress: progress[0] ? await this.hydrateSquadProgressFromAttempts(user, content, progress[0]) : null
     };
   }
 
@@ -73,6 +77,24 @@ export class PactService {
     const user = await this.repository.requireUser(session.userId);
     const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
     this.requireLearnerContentAccess(user, content);
+    if (isSquadCompletionContent(content) && user.squadId) {
+      const [completion, squadProgressRecords, score] = await Promise.all([
+        this.evaluateContentCompletion(user, content),
+        this.repository.listProgressForSquad(user, [content.id]),
+        this.repository.getScoreForUserContent(user.id, content.id)
+      ]);
+      return {
+        contentId: content.id,
+        completion,
+        progress: squadProgressRecords[0] ? await this.hydrateSquadProgressFromAttempts(user, content, squadProgressRecords[0]) : undefined,
+        score: score ? {
+          score: score.score,
+          maxScore: score.maxScore,
+          progressPercent: score.progressPercent,
+          agsStatus: score.agsStatus
+        } : undefined
+      };
+    }
     const [completion, progressRecords, score] = await Promise.all([
       this.evaluateContentCompletion(user, content),
       this.repository.listProgressForUser(user, [content.id]),
@@ -527,11 +549,16 @@ export class PactService {
     const user = await this.repository.requireUser(session.userId);
     const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
     this.requireLearnerContentAccess(user, content);
-    const existingProgress = (await this.repository.listProgressForUser(user, [content.id]))[0];
+    const isSquadContent = isSquadCompletionContent(content);
+    const existingProgress = isSquadContent && user.squadId
+      ? (await this.repository.listProgressForSquad(user, [content.id]))[0]
+      : (await this.repository.listProgressForUser(user, [content.id]))[0];
     this.assertAssessmentCanSubmit(content, existingProgress);
     const question = content.questions?.find((item) => item.id === questionId);
     if (!question) throw new AppError(404, "QUESTION_NOT_FOUND", "PACT question was not found for this content");
-    const existingAttemptCount = await this.repository.countQuestionAttemptsForUserContentQuestion({ user, content, questionId });
+    const existingAttemptCount = isSquadContent && user.squadId
+      ? await this.repository.countQuestionAttemptsForSquadContentQuestion({ user, content, questionId })
+      : await this.repository.countQuestionAttemptsForUserContentQuestion({ user, content, questionId });
     const attemptPolicy = assertQuestionAttemptAllowed(question, existingAttemptCount);
     if (!attemptPolicy.allowed) {
       throw new AppError(409, "QUESTION_ATTEMPT_LIMIT_REACHED", "Question attempt limit has been reached");
@@ -551,11 +578,9 @@ export class PactService {
       feedbackExposed: input.feedbackExposed
     });
     const answers = { ...(existingProgress?.answers ?? {}), [questionId]: input.answer };
-    const progress = await this.repository.upsertContentProgress({
-      user,
-      content,
-      answers
-    });
+    const progress = isSquadContent && user.squadId
+      ? await this.repository.upsertSquadContentProgress({ user, content, answers })
+      : await this.repository.upsertContentProgress({ user, content, answers });
 
     const finalScore = await this.finalizeCompletedQuestionContent(user, content);
     return {
@@ -987,7 +1012,9 @@ export class PactService {
   }
 
   private async effectiveLatestQuestionAttempts(user: PactUser, content: PactContent) {
-    const latestAttempts = await this.repository.listLatestQuestionAttemptsForUserContent({ user, content });
+    const latestAttempts = isSquadCompletionContent(content) && user.squadId
+      ? await this.repository.listLatestQuestionAttemptsForSquadContent({ user, content })
+      : await this.repository.listLatestQuestionAttemptsForUserContent({ user, content });
     const gradesByAttemptId = await this.repository.listQuestionGradesForAttempts([...latestAttempts.values()].map((attempt) => attempt.id));
     const effectiveAttempts = new Map<string, EffectiveQuestionAttempt>(latestAttempts);
     for (const [questionId, attempt] of latestAttempts.entries()) {
@@ -1003,6 +1030,24 @@ export class PactService {
       }
     }
     return effectiveAttempts;
+  }
+
+  private async hydrateSquadProgressFromAttempts(user: PactUser, content: PactContent, progress: PactContentProgress) {
+    if (!isSquadCompletionContent(content) || !user.squadId) return progress;
+    const latestAttempts = await this.repository.listLatestQuestionAttemptsForSquadContent({ user, content });
+    if (!latestAttempts.size) return progress;
+
+    const answersFromAttempts = Object.fromEntries(
+      [...latestAttempts.entries()].map(([questionId, attempt]) => [questionId, attempt.answer])
+    );
+    const answers = { ...answersFromAttempts, ...(progress.answers ?? {}) };
+    const answeredQuestionIds = Object.keys(answers).filter((questionId) => answers[questionId] !== undefined);
+    return {
+      ...progress,
+      answers,
+      answeredQuestionIds,
+      progressPercent: Math.max(progress.progressPercent, deriveProgressPercent(answeredQuestionIds.length, content))
+    };
   }
 
   private async acquireAgsAccessToken(user: PactUser, scopes = [AGS_SCORE_SCOPE]) {
@@ -1138,6 +1183,11 @@ function filterAnswersForContent(content: PactContent, answers: Record<string, P
   const questionIds = new Set((content.questions ?? []).map((question) => question.id));
   if (!questionIds.size) return answers;
   return Object.fromEntries(Object.entries(answers).filter(([questionId]) => questionIds.has(questionId)));
+}
+
+function deriveProgressPercent(answeredCount: number, content: PactContent) {
+  const questionCount = content.questionCount ?? content.questions?.length ?? 0;
+  return questionCount ? Math.min(100, Math.round((answeredCount / questionCount) * 100)) : 0;
 }
 
 export function scoreQuestion(question: PactQuestion, value: PactAnswerValue) {

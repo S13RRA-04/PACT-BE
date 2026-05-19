@@ -470,6 +470,110 @@ describe("PACT API", () => {
     });
   });
 
+  it("returns squad workshop free-form answers for instructor review", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "workshop-review-instructor",
+        lmsUserId: "lms-workshop-review-instructor",
+        email: "instructor@example.test",
+        name: "Workshop Instructor",
+        role: "instructor",
+        courseId: "pact-workshop-review",
+        cohortId: "cohort-workshop-review",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "workshop-review-submitter",
+        lmsUserId: "lms-workshop-review-submitter",
+        email: "submitter@example.test",
+        name: "Submitting Learner",
+        role: "learner",
+        courseId: "pact-workshop-review",
+        cohortId: "cohort-workshop-review",
+        squadId: "workshop-review-squad-1",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "workshop-review-reader",
+        lmsUserId: "lms-workshop-review-reader",
+        email: "reader@example.test",
+        name: "Reviewing Squadmate",
+        role: "learner",
+        courseId: "pact-workshop-review",
+        cohortId: "cohort-workshop-review",
+        squadId: "workshop-review-squad-1",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactSquads").insertOne({
+      id: "workshop-review-squad-1",
+      courseId: "pact-workshop-review",
+      cohortId: "cohort-workshop-review",
+      name: "Squad 1",
+      number: "1",
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("workshop:free-form-review", "cohort-workshop-review", "learner", "published", "workshop", false),
+      courseId: "pact-workshop-review",
+      title: "Free-form workshop",
+      questionCount: 2
+    });
+    await db.collection("test_pactContentProgress").insertOne({
+      id: "workshop-review-squad-progress",
+      scope: "squad",
+      courseId: "pact-workshop-review",
+      cohortId: "cohort-workshop-review",
+      squadId: "workshop-review-squad-1",
+      userId: "squad:workshop-review-squad-1",
+      updatedByUserId: "workshop-review-submitter",
+      contentId: "workshop:free-form-review",
+      contentType: "workshop",
+      answers: {
+        "free-q1": "The squad should preserve the mailbox and compare provider-side login records.",
+        "free-q2": "Next step is renewed legal process before the preservation window expires."
+      },
+      answeredQuestionIds: ["free-q1", "free-q2"],
+      progressPercent: 100,
+      status: "submitted",
+      submittedAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "workshop-review-instructor",
+      role: "instructor",
+      courseId: "pact-workshop-review",
+      cohortId: "cohort-workshop-review"
+    });
+
+    const response = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/content/workshop%3Afree-form-review/submissions")
+      .set("authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body.content).toMatchObject({ id: "workshop:free-form-review", title: "Free-form workshop" });
+    expect(response.body.prompts.map((prompt: { id: string }) => prompt.id)).toEqual(["free-q1", "free-q2"]);
+    expect(response.body.squads[0]).toMatchObject({ key: "1", label: "Squad 1" });
+    expect(response.body.squads[0].submissions).toHaveLength(2);
+    expect(response.body.squads[0].submissions[0]).toMatchObject({
+      learnerName: "Reviewing Squadmate",
+      status: "submitted",
+      completedPromptIds: ["free-q1", "free-q2"]
+    });
+    expect(response.body.squads[0].submissions[0].responses[0]).toMatchObject({
+      promptId: "free-q1",
+      response: "The squad should preserve the mailbox and compare provider-side login records."
+    });
+  });
+
   it("locks all published course content for a one-time admin reset", async () => {
     const db = await getMongoDb(config);
     const now = new Date().toISOString();
@@ -3752,6 +3856,110 @@ describe("PACT API", () => {
       .set("authorization", `Bearer ${unassignedToken}`)
       .send({ progressPercent: 100, status: "submitted" })
       .expect(409);
+  });
+
+  it("lets a squadmate read capstone question answers submitted by another squad member", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "capstone-squad-a",
+        lmsUserId: "lms-capstone-squad-a",
+        role: "learner",
+        courseId: "pact",
+        cohortId: "cohort-capstone-squad",
+        squadId: "capstone-squad-1",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "capstone-squad-b",
+        lmsUserId: "lms-capstone-squad-b",
+        role: "learner",
+        courseId: "pact",
+        cohortId: "cohort-capstone-squad",
+        squadId: "capstone-squad-1",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("capstone-squad-review", "cohort-capstone-squad", "learner", "published", "capstone"),
+      maxScore: 2,
+      questionCount: 2,
+      mechanics: {
+        kind: "daily_progression_capstone",
+        title: "Squad review capstone",
+        prompt: "Complete as a squad.",
+        day: 1,
+        session: "day-1",
+        version: 1,
+        releaseDependencies: [],
+        estimatedMinutes: 20,
+        scoringMode: "squad_completion",
+        progressionRole: "squad",
+        questions: [],
+        rubric: {
+          maxPoints: 2,
+          categories: [{ categoryId: "findings", label: { en: "Findings" }, maxPoints: 2 }]
+        }
+      },
+      questions: [
+        policyQuestion("capstone-squad-q1", { kind: "true_false", correct: true }, { points: 1 }),
+        policyQuestion("capstone-squad-q2", { kind: "true_false", correct: false }, { points: 1 })
+      ]
+    });
+    const learnerAToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "capstone-squad-a",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-capstone-squad",
+      squadId: "capstone-squad-1"
+    });
+    const learnerBToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "capstone-squad-b",
+      role: "learner",
+      courseId: "pact",
+      cohortId: "cohort-capstone-squad",
+      squadId: "capstone-squad-1"
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/capstone-squad-review/questions/capstone-squad-q1/attempts")
+      .set("authorization", `Bearer ${learnerAToken}`)
+      .send({ answer: true, feedbackExposed: true })
+      .expect(201);
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/capstone-squad-review/questions/capstone-squad-q2/attempts")
+      .set("authorization", `Bearer ${learnerAToken}`)
+      .send({ answer: false, feedbackExposed: true })
+      .expect(201);
+
+    const sharedProgress = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content/capstone-squad-review/squad-progress")
+      .set("authorization", `Bearer ${learnerBToken}`)
+      .expect(200);
+
+    expect(sharedProgress.body.progress).toMatchObject({
+      scope: "squad",
+      userId: "squad:capstone-squad-1",
+      updatedByUserId: "capstone-squad-a",
+      squadId: "capstone-squad-1",
+      contentId: "capstone-squad-review",
+      contentType: "capstone",
+      answers: {
+        "capstone-squad-q1": true,
+        "capstone-squad-q2": false
+      },
+      progressPercent: 100
+    });
+    expect(sharedProgress.body.progress.answeredQuestionIds.sort()).toEqual(["capstone-squad-q1", "capstone-squad-q2"]);
+
+    const learnerBProgress = await db.collection("test_pactContentProgress").findOne({
+      userId: "capstone-squad-b",
+      contentId: "capstone-squad-review"
+    });
+    expect(learnerBProgress).toBeNull();
   });
 
   it("records per-question attempts and exposes instructor review without LMS user IDs", async () => {

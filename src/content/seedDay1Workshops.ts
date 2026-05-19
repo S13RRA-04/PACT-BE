@@ -11,13 +11,19 @@ type SeedArgs = {
 
 type WorkshopSeed = {
   id: string;
-  squadNumber: SquadNumber;
+  squadNumber?: SquadNumber;
   title: string;
   prompt: string;
   questionCount: number;
 };
 
-const day1WorkshopSeeds: WorkshopSeed[] = [
+const workshopSeeds: WorkshopSeed[] = [
+  {
+    id: "day2-am-brokered-exit-synthesis",
+    title: "Day 2 AM - BROKERED EXIT Synthesis Worksheet",
+    prompt: "Complete the R3 synthesis worksheet using the Cardinal email exports, NorthBay subscriber return, IP-login exhibits, and the R0-R2 case picture before lunch.",
+    questionCount: 6
+  },
   {
     id: "day1-pm-squad-1-anyproxy",
     squadNumber: "1",
@@ -58,7 +64,7 @@ try {
   let upserted = 0;
   let modified = 0;
 
-  for (const workshop of day1WorkshopSeeds) {
+  for (const workshop of workshopSeeds) {
     const content = workshopContent(workshop, args, now);
     const { createdAt: _createdAt, ...contentUpdate } = content;
     const result = await db.collection<PactContent>(collectionName(config, "pactContent")).updateOne(
@@ -78,7 +84,7 @@ try {
     modified += result.modifiedCount;
   }
 
-  console.log(`Seeded Day 1 workshop markers for course ${args.courseId}, cohort ${args.cohortId ?? "all cohorts"}: ${upserted} inserted, ${modified} updated.`);
+  console.log(`Seeded workshop markers for course ${args.courseId}, cohort ${args.cohortId ?? "all cohorts"}: ${upserted} inserted, ${modified} updated.`);
 } finally {
   await closeMongoClient();
 }

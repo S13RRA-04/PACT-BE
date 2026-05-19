@@ -36,7 +36,19 @@ export default {
 
     const upstreamUrl = new URL(`${origin}${url.pathname}${url.search}`);
     const upstreamRequest = new Request(upstreamUrl, request);
-    const upstreamResponse = await fetch(upstreamRequest);
+    let upstreamResponse: Response;
+    try {
+      upstreamResponse = await fetch(upstreamRequest);
+    } catch (error) {
+      return withCors(
+        Response.json(
+          { error: { code: "PACT_UPSTREAM_ERROR", message: "Unable to reach PACT API origin" } },
+          { status: 502 }
+        ),
+        env,
+        request
+      );
+    }
     return withCors(upstreamResponse, env, request);
   }
 };
@@ -55,7 +67,7 @@ function withCors(response: Response, env: WorkerEnv, request: Request) {
   }
 
   headers.set("vary", "Origin");
-  headers.set("access-control-allow-methods", "GET,POST,PATCH,OPTIONS");
+  headers.set("access-control-allow-methods", "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
   headers.set("access-control-allow-headers", "authorization,content-type,x-csrf-token,x-request-id");
 
   return new Response(response.body, {
