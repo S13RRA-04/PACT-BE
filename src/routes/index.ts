@@ -10,7 +10,7 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { agendaUploadSchema, agsBackfillSchema, agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, capstoneImportSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, deckImportSchema, deckLockUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, releaseImportSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { agendaUploadSchema, agsBackfillSchema, agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, capstoneImportSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, deckImportSchema, deckLockUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, contentSubmissionScoreSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, releaseImportSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 import type { ContentType } from "../domain/types.js";
 import { listR2Documents, presignR2GetObject, putR2Object } from "../services/r2Service.js";
@@ -456,6 +456,19 @@ export function createApiRouter(config: AppConfig) {
         requireSession(req),
         req.params.attemptId,
         manualQuestionGradeSchema.parse(req.body)
+      )));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/content/:contentId/submissions/:userId/score", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      res.status(200).json(await pactService(config).then((service) => service.gradeContentSubmission(
+        requireSession(req),
+        req.params.contentId,
+        req.params.userId,
+        contentSubmissionScoreSchema.parse(req.body)
       )));
     } catch (error) {
       next(error);

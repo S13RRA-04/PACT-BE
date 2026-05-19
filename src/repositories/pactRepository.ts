@@ -191,8 +191,24 @@ export class PactRepository {
         })),
         updatedAt: progressRecord?.updatedAt,
         submittedAt: progressRecord?.submittedAt
+        
       };
     });
+
+    // attach any existing scores for the content to the submissions
+    const scores = await this.scores().find({ courseId: input.session.courseId, contentId: input.contentId }).toArray();
+    const scoresByUser = new Map(scores.map((s) => [s.userId, s]));
+    for (const submission of submissions) {
+      const s = scoresByUser.get(submission.userId);
+      if (s) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (submission as any).score = s.score;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (submission as any).maxScore = s.maxScore;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (submission as any).agsStatus = s.agsStatus;
+      }
+    }
 
     const squadKeys = Array.from(new Set(submissions.map((submission) => submission.squadNumber ?? submission.squadId ?? "unassigned"))).sort();
     return {
@@ -1536,6 +1552,25 @@ export class PactRepository {
 
   private auditEvents() {
     return this.db.collection<PactAuditEvent>(collectionName(this.config, "pactAuditEvents"));
+  }
+
+  async recordContentManualScoreAudit(input: { actorUserId: string; targetUserId: string; courseId: string; cohortId?: string; contentId: string; previousScore?: number; nextScore?: number; maxScore?: number }) {
+    const now = new Date().toISOString();
+    await this.auditEvents().insertOne({
+      id: crypto.randomUUID(),
+      action: "content.manual_score.upserted",
+      actorUserId: input.actorUserId,
+      targetUserId: input.targetUserId,
+      courseId: input.courseId,
+      cohortId: input.cohortId ?? "",
+      metadata: {
+        contentId: input.contentId,
+        previousScore: input.previousScore,
+        nextScore: input.nextScore,
+        maxScore: input.maxScore
+      },
+      createdAt: now
+    });
   }
 
   private agsPublishAttempts() {

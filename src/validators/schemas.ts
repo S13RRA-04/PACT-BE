@@ -250,6 +250,13 @@ export const manualQuestionGradeSchema = z.object({
   feedback: z.string().max(4000).optional()
 });
 
+export const contentSubmissionScoreSchema = z.object({
+  score: z.number().nonnegative(),
+  maxScore: z.number().positive().optional(),
+  progressPercent: z.number().min(0).max(100).optional(),
+  comment: z.string().max(4000).optional()
+});
+
 export const questionAttemptQuerySchema = z.object({
   cohortId: z.string().min(1).optional(),
   contentId: z.string().min(1).optional(),

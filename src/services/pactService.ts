@@ -239,6 +239,79 @@ export class PactService {
     };
   }
 
+  async gradeContentSubmission(session: PactSession, contentId: string, userId: string, input: {
+    score: number;
+    maxScore?: number;
+    progressPercent?: number;
+    comment?: string;
+  }) {
+    if (session.role !== "admin" && session.role !== "instructor") {
+      throw new AppError(403, "FORBIDDEN", "Instructor access is required");
+    }
+
+    const [user, content] = await Promise.all([
+      this.repository.requireUser(userId),
+      this.repository.requireContent(contentId)
+    ]);
+    if (user.courseId !== session.courseId || content.courseId !== session.courseId) {
+      throw new AppError(403, "CONTENT_FORBIDDEN", "Content or user is not assigned to this course");
+    }
+
+    const maxScore = input.maxScore ?? content.maxScore;
+    if (input.score > maxScore) {
+      throw new AppError(400, "INVALID_SCORE", "Score cannot exceed max score");
+    }
+
+    const submittedAt = new Date().toISOString();
+    const scoreInput = {
+      score: input.score,
+      progressPercent: input.progressPercent ?? 100,
+      comment: input.comment ?? buildAssessmentTimingComment(content, undefined, submittedAt)
+    };
+
+    const agsStatus = isSamePublishedScore(await this.repository.getScoreForUserContent(user.id, content.id), { ...scoreInput, maxScore })
+      ? await this.recordSkippedDuplicateAgsAttempt(user, content, scoreInput, maxScore)
+      : await this.enqueueFinalAgsPublish(user, content, scoreInput, maxScore);
+
+    const [score, progress] = await Promise.all([
+      this.repository.upsertScore({
+        user,
+        contentId: content.id,
+        contentType: content.type,
+        score: input.score,
+        maxScore,
+        progressPercent: scoreInput.progressPercent,
+        agsStatus
+      }),
+      this.repository.upsertContentProgress({
+        user,
+        content,
+        progressPercent: scoreInput.progressPercent,
+        status: "submitted",
+        submittedAt,
+        score: input.score,
+        maxScore
+      })
+    ]);
+
+    try {
+      await this.repository.recordContentManualScoreAudit({
+        actorUserId: session.userId,
+        targetUserId: user.id,
+        courseId: user.courseId,
+        cohortId: user.cohortId,
+        contentId: content.id,
+        previousScore: undefined,
+        nextScore: input.score,
+        maxScore
+      });
+    } catch {
+      // ignore audit failures
+    }
+
+    return { score, progress };
+  }
+
   async retryAgsPublishAttempt(session: PactSession, attemptId: string, input: { agsAccessToken?: string }) {
     if (session.role !== "admin" && session.role !== "instructor") {
       throw new AppError(403, "FORBIDDEN", "Instructor access is required");

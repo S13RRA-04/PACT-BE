@@ -374,7 +374,7 @@ export type PactQuestionGrade = {
 
 export type PactAuditEvent = {
   id: string;
-  action: "squad.assignment.changed" | "question.manual_grade.upserted" | "ags.queue.process_due.triggered";
+  action: "squad.assignment.changed" | "question.manual_grade.upserted" | "content.manual_score.upserted" | "ags.queue.process_due.triggered";
   actorUserId: string;
   targetUserId: string;
   courseId: string;
