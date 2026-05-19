@@ -10,7 +10,7 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { agendaUploadSchema, agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, deckImportSchema, deckLockUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, releaseImportSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { agendaUploadSchema, agsBackfillSchema, agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, capstoneImportSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, deckImportSchema, deckLockUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, releaseImportSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 import type { ContentType } from "../domain/types.js";
 import { listR2Documents, presignR2GetObject, putR2Object } from "../services/r2Service.js";
@@ -18,6 +18,7 @@ import { BugReportService } from "../services/bugReportService.js";
 import { ReleaseImportService } from "../services/releaseImportService.js";
 import { DeckImportService } from "../services/deckImportService.js";
 import { LmsRosterSyncService } from "../services/lmsRosterSyncService.js";
+import { CapstoneImportService } from "../services/capstoneImportService.js";
 
 const agendaR2Prefix = "Agendas/";
 const maxAgendaUploadBytes = 25 * 1024 * 1024;
@@ -390,6 +391,15 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.post("/admin/diagnostics/ags-publish-attempts/backfill-completed", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const input = agsBackfillSchema.parse(req.body ?? {});
+      res.status(200).json(await pactService(config).then((service) => service.backfillCompletedAgsSubmissionsForAdmin(requireSession(req), input)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/admin/diagnostics/ags-publish-attempts/:attemptId/retry", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       res.status(200).json(await pactService(config).then((service) => service.retryAgsPublishAttempt(
@@ -592,6 +602,16 @@ export function createApiRouter(config: AppConfig) {
     }
   });
 
+  router.post("/admin/capstones/import", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      const input = capstoneImportSchema.parse(req.body);
+      res.status(200).json(await new CapstoneImportService(repository).importCapstone(requireSession(req), input));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return router;
 }
 
@@ -621,7 +641,7 @@ function parseLaunchContentType(value: string | undefined): ContentType | undefi
     return undefined;
   }
 
-  if (value === "module" || value === "challenge" || value === "workshop" || value === "game" || value === "assessment") {
+  if (value === "module" || value === "challenge" || value === "workshop" || value === "game" || value === "assessment" || value === "capstone") {
     return value;
   }
 

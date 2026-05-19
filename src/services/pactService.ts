@@ -9,6 +9,24 @@ import type { PactSession } from "../auth/sessionService.js";
 import type { AppConfig } from "../config/config.js";
 import type { PactAgsPublishAttempt, PactAnswerValue, PactContent, PactContentProgress, PactMechanicsState, PactQuestion, PactUser } from "../domain/types.js";
 
+type AgsBackfillSkipReasons = {
+  alreadyPublished: number;
+  alreadyPending: number;
+  courseOrCohortMismatch: number;
+  missingScore: number;
+  notApplicable: number;
+  duplicateCandidate: number;
+};
+
+type AgsBackfillResult = {
+  scanned: number;
+  queued: number;
+  published: number;
+  skipped: number;
+  failed: number;
+  skipReasons: AgsBackfillSkipReasons;
+};
+
 export class PactService {
   constructor(
     private readonly repository: PactRepository,
@@ -273,6 +291,86 @@ export class PactService {
     return result;
   }
 
+  async backfillCompletedAgsSubmissionsForAdmin(session: PactSession, input: { cohortId?: string; limit?: number } = {}) {
+    if (session.role !== "admin" && session.role !== "instructor") {
+      throw new AppError(403, "PACT_ROLE_FORBIDDEN", "Instructor access is required");
+    }
+    const limit = input.limit ?? 500;
+
+    const progressRecords = await this.repository.listSubmittedUserProgressForAgsBackfill({
+      courseId: session.courseId,
+      cohortId: input.cohortId,
+      limit
+    });
+    const notApplicableAttempts = await this.repository.listNotApplicableAgsAttemptsForBackfill({
+      courseId: session.courseId,
+      cohortId: input.cohortId,
+      limit
+    });
+    const result = {
+      scanned: 0,
+      queued: 0,
+      published: 0,
+      skipped: 0,
+      failed: 0,
+      skipReasons: {
+        alreadyPublished: 0,
+        alreadyPending: 0,
+        courseOrCohortMismatch: 0,
+        missingScore: 0,
+        notApplicable: 0,
+        duplicateCandidate: 0
+      }
+    };
+    const seen = new Set<string>();
+    const operator = await this.repository.getUser(session.userId);
+
+    for (const progress of progressRecords) {
+      if (typeof progress.score !== "number" || typeof progress.maxScore !== "number") {
+        this.recordAgsBackfillSkip(result, "missingScore");
+        continue;
+      }
+
+      const key = agsBackfillKey({
+        userId: progress.userId,
+        contentId: progress.contentId,
+        score: progress.score,
+        maxScore: progress.maxScore,
+        progressPercent: progress.progressPercent
+      });
+      seen.add(key);
+      await this.backfillAgsCandidate(session, result, {
+        userId: progress.userId,
+        contentId: progress.contentId,
+        cohortId: progress.cohortId,
+        score: progress.score,
+        maxScore: progress.maxScore,
+        progressPercent: progress.progressPercent,
+        comment: `Backfilled completed PACT submission from ${progress.submittedAt ?? progress.updatedAt}.`
+      }, operator);
+    }
+
+    for (const attempt of notApplicableAttempts) {
+      const key = agsBackfillKey(attempt);
+      if (seen.has(key)) {
+        this.recordAgsBackfillSkip(result, "duplicateCandidate");
+        continue;
+      }
+      seen.add(key);
+      await this.backfillAgsCandidate(session, result, {
+        userId: attempt.userId,
+        contentId: attempt.contentId,
+        cohortId: attempt.cohortId,
+        score: attempt.score,
+        maxScore: attempt.maxScore,
+        progressPercent: attempt.progressPercent,
+        comment: attempt.comment ?? `Retried previous not_applicable AGS outcome from ${attempt.createdAt}.`
+      }, operator);
+    }
+
+    return result;
+  }
+
   async submitScore(session: PactSession, input: { contentId: string; score: number; maxScore?: number; progressPercent: number; agsAccessToken?: string }) {
     const user = await this.repository.requireUser(session.userId);
     const content = this.prepareContentForUser(user, await this.repository.requireContent(input.contentId));
@@ -468,7 +566,7 @@ export class PactService {
   private requireSquadContentAccess(user: PactUser, content: PactContent) {
     this.requireLearnerContentAccess(user, content);
     if (!isSquadCompletionContent(content)) {
-      throw new AppError(400, "SQUAD_PROGRESS_UNSUPPORTED", "Squad progress is only supported for challenges and workshops");
+      throw new AppError(400, "SQUAD_PROGRESS_UNSUPPORTED", "Squad progress is only supported for challenges, workshops, and capstones");
     }
     if (!user.squadId) {
       throw new AppError(409, "SQUAD_REQUIRED", "A squad assignment is required for squad progress");
@@ -565,11 +663,12 @@ export class PactService {
     content: PactContent,
     input: { score: number; progressPercent: number; agsAccessToken?: string; comment?: string },
     maxScore: number,
-    retryCount = 0
+    retryCount = 0,
+    options: { lineItemUrl?: string; tokenUser?: PactUser } = {}
   ) {
     try {
-      const agsStatus = await this.sendScoreToAgs(user, content, input, maxScore);
-      await this.recordAgsAttempt(user, content, input, maxScore, agsStatus, undefined, retryCount);
+      const agsStatus = await this.sendScoreToAgs(user, content, input, maxScore, options);
+      await this.recordAgsAttempt(user, content, input, maxScore, agsStatus, undefined, retryCount, undefined, options.lineItemUrl);
       return agsStatus;
     } catch (error) {
       const nextRetryCount = retryCount;
@@ -594,6 +693,83 @@ export class PactService {
       }
       throw error;
     }
+  }
+
+  private async backfillAgsCandidate(
+    session: PactSession,
+    result: AgsBackfillResult,
+    candidate: {
+      userId: string;
+      contentId: string;
+      cohortId: string;
+      score: number;
+      maxScore: number;
+      progressPercent: number;
+      comment: string;
+    },
+    operator?: PactUser | null
+  ) {
+    result.scanned += 1;
+    try {
+      const [user, content, existingPending, existingPublished] = await Promise.all([
+        this.repository.requireUser(candidate.userId),
+        this.repository.requireContent(candidate.contentId),
+        this.repository.findAgsPublishAttempt({
+          userId: candidate.userId,
+          contentId: candidate.contentId,
+          score: candidate.score,
+          maxScore: candidate.maxScore,
+          progressPercent: candidate.progressPercent,
+          status: "pending"
+        }),
+        this.repository.findAgsPublishAttempt({
+          userId: candidate.userId,
+          contentId: candidate.contentId,
+          score: candidate.score,
+          maxScore: candidate.maxScore,
+          progressPercent: candidate.progressPercent,
+          status: "published"
+        })
+      ]);
+      if (user.courseId !== session.courseId || content.courseId !== session.courseId || user.cohortId !== candidate.cohortId) {
+        this.recordAgsBackfillSkip(result, "courseOrCohortMismatch");
+        return;
+      }
+      if (existingPublished) {
+        this.recordAgsBackfillSkip(result, "alreadyPublished");
+        return;
+      }
+      if (existingPending) {
+        this.recordAgsBackfillSkip(result, "alreadyPending");
+        return;
+      }
+
+      const operatorLineItemUrl = operator ? await this.resolveLineItemUrl(operator, content) : undefined;
+      const agsStatus = await this.enqueueFinalAgsPublish(user, content, {
+        score: candidate.score,
+        progressPercent: candidate.progressPercent,
+        comment: candidate.comment
+      }, candidate.maxScore, { lineItemUrl: operatorLineItemUrl, tokenUser: operator ?? undefined });
+      await this.repository.upsertScore({
+        user,
+        contentId: content.id,
+        contentType: content.type,
+        score: candidate.score,
+        maxScore: candidate.maxScore,
+        progressPercent: candidate.progressPercent,
+        agsStatus
+      });
+      if (agsStatus === "published") result.published += 1;
+      else if (agsStatus === "pending") result.queued += 1;
+      else this.recordAgsBackfillSkip(result, "notApplicable");
+    } catch {
+      result.failed += 1;
+    }
+  }
+
+  private recordAgsBackfillSkip(result: AgsBackfillResult, reason: keyof AgsBackfillSkipReasons) {
+    result.skipped += 1;
+    result.skipReasons[reason] += 1;
   }
 
   private async finalizeCompletedQuestionContent(user: PactUser, content: PactContent) {
@@ -665,10 +841,16 @@ export class PactService {
     user: PactUser,
     content: PactContent,
     input: { score: number; progressPercent: number; comment?: string },
-    maxScore: number
+    maxScore: number,
+    options: { lineItemUrl?: string; tokenUser?: PactUser } = {}
   ) {
-    if (!content.lineItemUrl) {
+    const lineItemUrl = await this.resolveLineItemUrl(user, content) ?? options.lineItemUrl;
+    if (!lineItemUrl) {
       return this.publishScoreToAgs(user, content, input, maxScore);
+    }
+
+    if (await this.hasUsableAgsContext(user) || (options.tokenUser && await this.hasUsableAgsContext(options.tokenUser))) {
+      return this.publishScoreToAgs(user, content, input, maxScore, 0, { ...options, lineItemUrl });
     }
 
     const existingPending = await this.repository.findAgsPublishAttempt({
@@ -681,7 +863,7 @@ export class PactService {
     });
     if (existingPending) return "pending" as const;
 
-    await this.recordAgsAttempt(user, content, input, maxScore, "pending", undefined, 0, new Date().toISOString());
+    await this.recordAgsAttempt(user, content, input, maxScore, "pending", undefined, 0, new Date().toISOString(), lineItemUrl);
     return "pending" as const;
   }
 
@@ -747,13 +929,15 @@ export class PactService {
     user: PactUser,
     content: PactContent,
     input: { score: number; progressPercent: number; agsAccessToken?: string; comment?: string },
-    maxScore: number
+    maxScore: number,
+    options: { lineItemUrl?: string; tokenUser?: PactUser } = {}
   ) {
-    const accessToken = content.lineItemUrl
-      ? input.agsAccessToken ?? await this.acquireAgsAccessToken(user)
+    const lineItemUrl = options.lineItemUrl ?? await this.resolveLineItemUrl(user, content);
+    const accessToken = lineItemUrl
+      ? input.agsAccessToken ?? await this.acquireAgsAccessToken(options.tokenUser ?? user)
       : input.agsAccessToken;
     return this.ags.publishScore({
-      lineItemUrl: content.lineItemUrl,
+      lineItemUrl,
       accessToken,
       userId: user.lmsUserId,
       score: input.score,
@@ -784,14 +968,7 @@ export class PactService {
   }
 
   private async acquireAgsAccessToken(user: PactUser) {
-    const context = await this.repository.getAgsContextForUser({
-      userId: user.id,
-      courseId: user.courseId,
-      cohortId: user.cohortId
-    }) ?? await this.repository.getLatestAgsContextForCourseCohort({
-      courseId: user.courseId,
-      cohortId: user.cohortId
-    });
+    const context = await this.resolveAgsContext(user);
     if (!context) {
       throw new AppError(502, "AGS_CONTEXT_MISSING", "No AGS launch context is available for this course/cohort");
     }
@@ -800,6 +977,30 @@ export class PactService {
     }
     const token = await this.tokens.getAgsAccessToken([AGS_SCORE_SCOPE]);
     return token.accessToken;
+  }
+
+  private async resolveLineItemUrl(user: PactUser, content: PactContent) {
+    if (content.lineItemUrl) {
+      return content.lineItemUrl;
+    }
+    const context = await this.resolveAgsContext(user);
+    return context?.lineItemUrl;
+  }
+
+  private async hasUsableAgsContext(user: PactUser) {
+    const context = await this.resolveAgsContext(user);
+    return Boolean(context?.scopes.includes(AGS_SCORE_SCOPE));
+  }
+
+  private async resolveAgsContext(user: PactUser) {
+    return await this.repository.getAgsContextForUser({
+      userId: user.id,
+      courseId: user.courseId,
+      cohortId: user.cohortId
+    }) ?? await this.repository.getLatestAgsContextForCourseCohort({
+      courseId: user.courseId,
+      cohortId: user.cohortId
+    });
   }
 
   private async recordSkippedDuplicateAgsAttempt(
@@ -820,7 +1021,8 @@ export class PactService {
     status: "pending" | "published" | "failed" | "retry_exhausted" | "not_applicable" | "skipped_duplicate",
     error?: unknown,
     retryCount?: number,
-    nextRetryAt?: string
+    nextRetryAt?: string,
+    lineItemUrl?: string
   ) {
     return this.repository.recordAgsPublishAttempt({
       courseId: user.courseId,
@@ -828,7 +1030,7 @@ export class PactService {
       squadId: user.squadId,
       userId: user.id,
       contentId: content.id,
-      lineItemUrl: content.lineItemUrl,
+      lineItemUrl: lineItemUrl ?? await this.resolveLineItemUrl(user, content),
       score: input.score,
       maxScore,
       progressPercent: input.progressPercent,
@@ -857,7 +1059,11 @@ function isFullCreditManualGrade(score: number, maxScore: number) {
 }
 
 function isSquadCompletionContent(content: PactContent) {
-  return content.type === "challenge" || content.type === "workshop";
+  return content.type === "challenge" || content.type === "workshop" || content.type === "capstone";
+}
+
+function agsBackfillKey(input: { userId: string; contentId: string; score: number; maxScore: number; progressPercent: number }) {
+  return `${input.userId}:${input.contentId}:${input.score}:${input.maxScore}:${input.progressPercent}`;
 }
 
 function filterAnswersForContent(content: PactContent, answers: Record<string, PactAnswerValue>) {
@@ -934,16 +1140,6 @@ function isRecordLike(value: unknown): value is Record<string, unknown> {
 
 function sameSet(left: string[], right: string[]) {
   return left.length === right.length && left.every((value) => right.includes(value));
-}
-
-function isSamePublishedScore(
-  existing: { score: number; maxScore: number; progressPercent: number; agsStatus: string } | null,
-  next: { score: number; maxScore: number; progressPercent: number }
-) {
-  return existing?.agsStatus === "published"
-    && existing.score === next.score
-    && existing.maxScore === next.maxScore
-    && existing.progressPercent === next.progressPercent;
 }
 
 function buildAssessmentTimingComment(content: PactContent, progress: PactContentProgress | undefined, submittedAt: string) {

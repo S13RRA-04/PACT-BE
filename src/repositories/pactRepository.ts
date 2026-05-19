@@ -861,6 +861,35 @@ export class PactRepository {
       .toArray();
   }
 
+  async listSubmittedUserProgressForAgsBackfill(input: { courseId: string; cohortId?: string; limit: number }) {
+    return this.contentProgress()
+      .find({
+        courseId: input.courseId,
+        ...(input.cohortId ? { cohortId: input.cohortId } : {}),
+        status: "submitted",
+        score: { $exists: true },
+        maxScore: { $exists: true },
+        $or: [{ scope: "user" }, { scope: { $exists: false } }]
+      })
+      .project<Omit<PactContentProgress, "_id">>({ _id: 0 })
+      .sort({ submittedAt: -1, updatedAt: -1 })
+      .limit(input.limit)
+      .toArray();
+  }
+
+  async listNotApplicableAgsAttemptsForBackfill(input: { courseId: string; cohortId?: string; limit: number }) {
+    return this.agsPublishAttempts()
+      .find({
+        courseId: input.courseId,
+        ...(input.cohortId ? { cohortId: input.cohortId } : {}),
+        status: "not_applicable"
+      })
+      .project<Omit<PactAgsPublishAttempt, "_id">>({ _id: 0 })
+      .sort({ createdAt: -1 })
+      .limit(input.limit)
+      .toArray();
+  }
+
   async recordManualAgsQueueProcessingAudit(input: {
     session: { userId: string; courseId: string; cohortId: string };
     result: { scanned: number; retried: number; failed: number; exhausted: number };

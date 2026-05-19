@@ -26,7 +26,7 @@ Staging and production are intentionally separate.
 | Staging | `npm run deploy:worker:staging` | `cetu-pact-api-staging` | `https://pact-api-origin-staging.cetu.online` | `https://cetu-pact-web-staging.pages.dev,https://pact-staging.cetu.online` |
 | Production | `npm run deploy:worker:production` | `cetu-pact-api` | `https://pact-api-origin.cetu.online` | `https://pact2.cetu.online,https://lms.cetu.online` |
 
-The deploy scripts run `npm run build` and `npm test` before publishing. Worker names, origins, and CORS origins are defined in `wrangler.jsonc` under `env.staging` and `env.production`, so staging and production deploys use explicit Wrangler environments:
+The deploy scripts run `npm run build` and `npm test` before publishing. The production deploy also restarts the Node/Express origin on port `4200` and waits for `/health` so the Worker proxy does not keep forwarding to stale `dist` code. Worker names, origins, and CORS origins are defined in `wrangler.jsonc` under `env.staging` and `env.production`, so staging and production deploys use explicit Wrangler environments:
 
 ```powershell
 npx wrangler deploy --env staging
@@ -59,6 +59,12 @@ The production origin can be started with:
 ```powershell
 npm run build
 .\scripts\start-production-origin.ps1
+```
+
+For production deployments, prefer the guarded restart path instead of starting a second origin process:
+
+```powershell
+npm run deploy:worker:production
 ```
 
 For staging hosts that must recover before interactive logon, install the origin and tunnel as real Windows services through NSSM:

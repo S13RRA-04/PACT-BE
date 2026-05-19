@@ -1,5 +1,5 @@
 export type PactRole = "admin" | "instructor" | "learner";
-export type ContentType = "module" | "challenge" | "workshop" | "game" | "assessment";
+export type ContentType = "module" | "challenge" | "workshop" | "game" | "assessment" | "capstone";
 export type ContentStatus = "draft" | "published" | "archived";
 export type SquadNumber = "1" | "2" | "3" | "4";
 
@@ -193,7 +193,29 @@ export type AssessmentTimingConfig = {
   submitTrigger: "content_submit";
 };
 
-export type ContentMechanics = ChallengeMechanics | GameMechanics | AssessmentMechanics;
+export type CapstoneMechanics = {
+  kind: "daily_progression_capstone";
+  title: string;
+  prompt: string;
+  day: number;
+  session: string;
+  version: number;
+  releaseDependencies: string[];
+  estimatedMinutes: number;
+  scoringMode: string;
+  progressionRole: string;
+  questions: Array<Record<string, unknown>>;
+  rubric: {
+    maxPoints: number;
+    categories: Array<{
+      categoryId: string;
+      label: { en: string };
+      maxPoints: number;
+    }>;
+  };
+};
+
+export type ContentMechanics = ChallengeMechanics | GameMechanics | AssessmentMechanics | CapstoneMechanics;
 
 export type PactScore = {
   id: string;

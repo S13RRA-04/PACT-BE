@@ -102,10 +102,33 @@ const assessmentMechanicsSchema = z.object({
   })).min(1).max(12)
 });
 
+const capstoneMechanicsSchema = z.object({
+  kind: z.literal("daily_progression_capstone"),
+  title: z.string().min(1).max(200),
+  prompt: z.string().min(1).max(4000),
+  day: z.number().int().min(1).max(30),
+  session: z.string().min(1).max(80),
+  version: z.number().int().min(1),
+  releaseDependencies: z.array(z.string().min(1).max(80)).max(20),
+  estimatedMinutes: z.number().int().positive().max(480),
+  scoringMode: z.string().min(1).max(80),
+  progressionRole: z.string().min(1).max(80),
+  questions: z.array(z.record(z.unknown())).max(30),
+  rubric: z.object({
+    maxPoints: z.number().nonnegative(),
+    categories: z.array(z.object({
+      categoryId: z.string().min(1).max(80),
+      label: z.object({ en: z.string().min(1) }),
+      maxPoints: z.number().nonnegative()
+    })).max(20)
+  })
+});
+
 const contentMechanicsSchema = z.discriminatedUnion("kind", [
   challengeMechanicsSchema,
   gameMechanicsSchema,
-  assessmentMechanicsSchema
+  assessmentMechanicsSchema,
+  capstoneMechanicsSchema
 ]);
 
 export const contentCreateSchema = z.object({
@@ -113,7 +136,7 @@ export const contentCreateSchema = z.object({
   courseId: z.string().min(1),
   cohortId: z.string().min(1).optional(),
   role: z.enum(["admin", "instructor", "learner", "all"]).default("all"),
-  type: z.enum(["module", "challenge", "workshop", "game", "assessment"]),
+  type: z.enum(["module", "challenge", "workshop", "game", "assessment", "capstone"]),
   title: z.string().min(1).max(200),
   lmsLabel: z.string().min(1).max(200).optional(),
   prompt: z.string().min(1).max(4000),
@@ -140,6 +163,13 @@ export const contentCreateSchema = z.object({
       path: ["mechanics"]
     });
   }
+  if (content.type !== "capstone" && mechanics.kind === "daily_progression_capstone") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "daily_progression_capstone mechanics are only valid for capstone content",
+      path: ["mechanics", "kind"]
+    });
+  }
   if (mechanics.kind === "challenge_path" && mechanics.defaultPathId && !mechanics.paths.some((path) => path.id === mechanics.defaultPathId)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -156,10 +186,11 @@ export const contentCreateSchema = z.object({
   }
 });
 
-function expectedMechanicsKind(type: "module" | "challenge" | "workshop" | "game" | "assessment") {
+function expectedMechanicsKind(type: "module" | "challenge" | "workshop" | "game" | "assessment" | "capstone") {
   if (type === "challenge") return "challenge_path";
   if (type === "game") return "packet_capture";
   if (type === "assessment") return "readiness_checklist";
+  if (type === "capstone") return "daily_progression_capstone";
   return undefined;
 }
 
@@ -260,6 +291,11 @@ export const agsPublishRetrySchema = z.object({
   agsAccessToken: z.string().min(1).optional()
 });
 
+export const agsBackfillSchema = z.object({
+  cohortId: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(1000).default(500)
+});
+
 export const bugReportCreateSchema = z.object({
   title: z.string().trim().min(4).max(160),
   description: z.string().trim().min(10).max(5000),
@@ -274,6 +310,36 @@ export const releaseImportSchema = z.object({
 
 export const deckImportSchema = z.object({
   prefix: z.string().trim().min(1).max(1000)
+});
+
+const localizedStringSchema = z.object({ en: z.string().min(1) });
+
+export const capstoneImportSchema = z.object({
+  cohortId: z.string().min(1).optional(),
+  capstone: z.object({
+    _id: z.string().min(1).max(120),
+    courseId: z.string().min(1).max(80),
+    caseId: z.string().min(1).max(80),
+    day: z.number().int().min(1).max(30),
+    session: z.literal("end_of_day"),
+    version: z.number().int().min(1),
+    title: localizedStringSchema,
+    studentInstructions: localizedStringSchema,
+    instructorNotes: localizedStringSchema.optional(),
+    releaseDependencies: z.array(z.string().min(1).max(80)).max(20),
+    estimatedMinutes: z.number().int().positive().max(480),
+    scoringMode: z.string().min(1).max(80),
+    progressionRole: z.string().min(1).max(80),
+    questions: z.array(z.record(z.unknown())).max(30),
+    rubric: z.object({
+      maxPoints: z.number().nonnegative(),
+      categories: z.array(z.object({
+        categoryId: z.string().min(1).max(80),
+        label: localizedStringSchema,
+        maxPoints: z.number().nonnegative()
+      })).max(20)
+    })
+  })
 });
 
 export const agendaUploadSchema = z.object({

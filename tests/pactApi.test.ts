@@ -2548,6 +2548,353 @@ describe("PACT API", () => {
     }
   });
 
+  it("backfills already-completed PACT submissions into AGS", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "ags-backfill-instructor",
+        lmsUserId: "lms-ags-backfill-instructor",
+        role: "instructor",
+        courseId: "pact-ags-backfill",
+        cohortId: "cohort-a",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "ags-backfill-learner",
+        lmsUserId: "lms-ags-backfill-learner",
+        role: "learner",
+        courseId: "pact-ags-backfill",
+        cohortId: "cohort-a",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("ags-backfill-content", "cohort-a", "learner", "published", "module"),
+      courseId: "pact-ags-backfill",
+      lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/backfill-lineitem"
+    });
+    await db.collection("test_pactAgsContexts").insertOne({
+      id: "ags-backfill-context",
+      courseId: "pact-ags-backfill",
+      cohortId: "cohort-a",
+      userId: "ags-backfill-instructor",
+      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContentProgress").insertOne({
+      id: "ags-backfill-progress",
+      scope: "user",
+      courseId: "pact-ags-backfill",
+      cohortId: "cohort-a",
+      userId: "ags-backfill-learner",
+      contentId: "ags-backfill-content",
+      contentType: "module",
+      answers: {},
+      answeredQuestionIds: [],
+      progressPercent: 100,
+      score: 9,
+      maxScore: 10,
+      status: "submitted",
+      submittedAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "ags-backfill-instructor",
+      role: "instructor",
+      courseId: "pact-ags-backfill",
+      cohortId: "cohort-a"
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ access_token: "backfill-ags-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    try {
+      const response = await request(createApp(config, createLogger(config)))
+        .post("/api/v1/admin/diagnostics/ags-publish-attempts/backfill-completed")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .expect(200);
+
+      expect(response.body).toMatchObject({ scanned: 1, queued: 0, published: 1, skipped: 0, failed: 0 });
+      await expect(db.collection("test_pactScores").findOne({
+        userId: "ags-backfill-learner",
+        contentId: "ags-backfill-content"
+      })).resolves.toMatchObject({ score: 9, maxScore: 10, progressPercent: 100, agsStatus: "published" });
+      await expect(db.collection("test_pactAgsPublishAttempts").findOne({
+        userId: "ags-backfill-learner",
+        contentId: "ags-backfill-content"
+      })).resolves.toMatchObject({ status: "published", score: 9, maxScore: 10 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(await db.collection("test_pactAgsPublishAttempts").findOne({
+        userId: "ags-backfill-learner",
+        contentId: "ags-backfill-content"
+      }))).not.toContain("backfill-ags-token");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("backfills previous not_applicable AGS attempts when launch context is later available", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "ags-not-applicable-instructor",
+        lmsUserId: "lms-ags-not-applicable-instructor",
+        role: "instructor",
+        courseId: "pact-ags-not-applicable",
+        cohortId: "cohort-a",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "ags-not-applicable-learner",
+        lmsUserId: "lms-ags-not-applicable-learner",
+        role: "learner",
+        courseId: "pact-ags-not-applicable",
+        cohortId: "cohort-a",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("ags-not-applicable-content", "cohort-a", "learner", "published", "module"),
+      courseId: "pact-ags-not-applicable"
+    });
+    await db.collection("test_pactAgsContexts").insertOne({
+      id: "ags-not-applicable-context",
+      courseId: "pact-ags-not-applicable",
+      cohortId: "cohort-a",
+      userId: "ags-not-applicable-instructor",
+      lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/not-applicable-lineitem",
+      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactAgsPublishAttempts").insertOne({
+      id: "ags-not-applicable-attempt",
+      courseId: "pact-ags-not-applicable",
+      cohortId: "cohort-a",
+      userId: "ags-not-applicable-learner",
+      contentId: "ags-not-applicable-content",
+      score: 7,
+      maxScore: 10,
+      progressPercent: 100,
+      status: "not_applicable",
+      retryCount: 0,
+      createdAt: now
+    });
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "ags-not-applicable-instructor",
+      role: "instructor",
+      courseId: "pact-ags-not-applicable",
+      cohortId: "cohort-a"
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ access_token: "not-applicable-ags-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    try {
+      const response = await request(createApp(config, createLogger(config)))
+        .post("/api/v1/admin/diagnostics/ags-publish-attempts/backfill-completed")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .expect(200);
+
+      expect(response.body).toMatchObject({ scanned: 1, queued: 0, published: 1, skipped: 0, failed: 0 });
+      await expect(db.collection("test_pactScores").findOne({
+        userId: "ags-not-applicable-learner",
+        contentId: "ags-not-applicable-content"
+      })).resolves.toMatchObject({ score: 7, maxScore: 10, progressPercent: 100, agsStatus: "published" });
+      await expect(db.collection("test_pactAgsPublishAttempts").findOne({
+        userId: "ags-not-applicable-learner",
+        contentId: "ags-not-applicable-content",
+        status: "published"
+      })).resolves.toMatchObject({
+        lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/not-applicable-lineitem",
+        score: 7,
+        maxScore: 10
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("does not let stale local published score status block not_applicable AGS backfill", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "ags-stale-score-instructor",
+        lmsUserId: "lms-ags-stale-score-instructor",
+        role: "instructor",
+        courseId: "pact-ags-stale-score",
+        cohortId: "cohort-a",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "ags-stale-score-learner",
+        lmsUserId: "lms-ags-stale-score-learner",
+        role: "learner",
+        courseId: "pact-ags-stale-score",
+        cohortId: "cohort-a",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("ags-stale-score-content", "cohort-a", "learner", "published", "module"),
+      courseId: "pact-ags-stale-score"
+    });
+    await db.collection("test_pactAgsContexts").insertOne({
+      id: "ags-stale-score-context",
+      courseId: "pact-ags-stale-score",
+      cohortId: "cohort-a",
+      userId: "ags-stale-score-instructor",
+      lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/stale-score-lineitem",
+      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactScores").insertOne({
+      id: "ags-stale-score",
+      courseId: "pact-ags-stale-score",
+      cohortId: "cohort-a",
+      userId: "ags-stale-score-learner",
+      contentId: "ags-stale-score-content",
+      contentType: "module",
+      score: 6,
+      maxScore: 10,
+      progressPercent: 100,
+      agsStatus: "published",
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactAgsPublishAttempts").insertOne({
+      id: "ags-stale-score-not-applicable",
+      courseId: "pact-ags-stale-score",
+      cohortId: "cohort-a",
+      userId: "ags-stale-score-learner",
+      contentId: "ags-stale-score-content",
+      score: 6,
+      maxScore: 10,
+      progressPercent: 100,
+      status: "not_applicable",
+      retryCount: 0,
+      createdAt: now
+    });
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "ags-stale-score-instructor",
+      role: "instructor",
+      courseId: "pact-ags-stale-score",
+      cohortId: "cohort-a"
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ access_token: "stale-score-ags-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    try {
+      const response = await request(createApp(config, createLogger(config)))
+        .post("/api/v1/admin/diagnostics/ags-publish-attempts/backfill-completed")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .expect(200);
+
+      expect(response.body).toMatchObject({ scanned: 1, queued: 0, published: 1, skipped: 0, failed: 0 });
+      await expect(db.collection("test_pactAgsPublishAttempts").findOne({
+        userId: "ags-stale-score-learner",
+        contentId: "ags-stale-score-content",
+        status: "published"
+      })).resolves.toMatchObject({ score: 6, maxScore: 10 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("backfills not_applicable AGS attempts across cohorts by default", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "ags-cross-cohort-instructor",
+        lmsUserId: "lms-ags-cross-cohort-instructor",
+        role: "instructor",
+        courseId: "pact-ags-cross-cohort",
+        cohortId: "cohort-launch",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "ags-cross-cohort-learner",
+        lmsUserId: "lms-ags-cross-cohort-learner",
+        role: "learner",
+        courseId: "pact-ags-cross-cohort",
+        cohortId: "cohort-target",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("ags-cross-cohort-content", "cohort-target", "learner", "published", "module"),
+      courseId: "pact-ags-cross-cohort"
+    });
+    await db.collection("test_pactAgsContexts").insertOne({
+      id: "ags-cross-cohort-context",
+      courseId: "pact-ags-cross-cohort",
+      cohortId: "cohort-launch",
+      userId: "ags-cross-cohort-instructor",
+      lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/cross-cohort-lineitem",
+      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactAgsPublishAttempts").insertOne({
+      id: "ags-cross-cohort-not-applicable",
+      courseId: "pact-ags-cross-cohort",
+      cohortId: "cohort-target",
+      userId: "ags-cross-cohort-learner",
+      contentId: "ags-cross-cohort-content",
+      score: 8,
+      maxScore: 10,
+      progressPercent: 100,
+      status: "not_applicable",
+      retryCount: 0,
+      createdAt: now
+    });
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "ags-cross-cohort-instructor",
+      role: "instructor",
+      courseId: "pact-ags-cross-cohort",
+      cohortId: "cohort-launch"
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ access_token: "cross-cohort-ags-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    try {
+      const response = await request(createApp(config, createLogger(config)))
+        .post("/api/v1/admin/diagnostics/ags-publish-attempts/backfill-completed")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .send({ limit: 10 })
+        .expect(200);
+
+      expect(response.body).toMatchObject({ scanned: 1, queued: 0, published: 1, skipped: 0, failed: 0 });
+      await expect(db.collection("test_pactAgsPublishAttempts").findOne({
+        userId: "ags-cross-cohort-learner",
+        contentId: "ags-cross-cohort-content",
+        status: "published"
+      })).resolves.toMatchObject({ score: 8, maxScore: 10 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("lets external schedulers process due AGS queue attempts with a dedicated secret", async () => {
     const db = await getMongoDb(config);
     const now = new Date().toISOString();
@@ -3503,11 +3850,12 @@ describe("PACT API", () => {
     expect(JSON.stringify(reviewResponse.body)).not.toContain("lms-user-1");
   });
 
-  it("scores question submissions immediately and waits for content completion before publishing AGS", async () => {
+  it("scores question submissions immediately and publishes AGS when content is complete", async () => {
     const db = await getMongoDb(config);
     const idToken = await signResourceLaunch({
       ags: {
         lineitems: "http://lms.example.test/api/v1/lti/ags/lineitems",
+        lineitem: "http://lms.example.test/api/v1/lti/ags/lineitems/completion-gated",
         scope: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"]
       }
     });
@@ -3522,7 +3870,6 @@ describe("PACT API", () => {
       {
         $set: {
           ...publishedContent("completion-gated-attempt-content", "cohort-launch", "learner", "published", "module"),
-          lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/completion-gated",
           questionCount: 2,
           questions: [
             {
@@ -3594,7 +3941,7 @@ describe("PACT API", () => {
         score: 10,
         maxScore: 10,
         progressPercent: 100,
-        agsStatus: "pending"
+        agsStatus: "published"
       });
       expect(secondAttempt.body.progress).toMatchObject({
         status: "submitted",
@@ -3602,7 +3949,15 @@ describe("PACT API", () => {
         maxScore: 10,
         progressPercent: 100
       });
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        "http://lms.example.test/api/v1/lti/ags/lineitems/completion-gated/scores",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({ Authorization: "Bearer completion-ags-token" })
+        })
+      );
       const completionStatus = await request(createApp(config, createLogger(config)))
         .get("/api/v1/content/completion-gated-attempt-content/completion")
         .set("authorization", `Bearer ${token}`)
@@ -3614,42 +3969,19 @@ describe("PACT API", () => {
         score: 10,
         maxScore: 10
       });
-      expect(completionStatus.body.score).toMatchObject({ agsStatus: "pending" });
+      expect(completionStatus.body.score).toMatchObject({ agsStatus: "published" });
 
       const queuedAttempts = await db.collection("test_pactAgsPublishAttempts")
         .find({ contentId: "completion-gated-attempt-content", userId: launchResponse.body.user.id })
         .toArray();
       expect(queuedAttempts).toHaveLength(1);
       expect(queuedAttempts[0]).toMatchObject({
-        status: "pending",
+        status: "published",
         score: 10,
         maxScore: 10,
-        retryCount: 0
+        lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/completion-gated"
       });
-
-      const retryResult = await new PactService(
-        new PactRepository(db, config),
-        new LmsAgsClient(),
-        new LmsTokenClient(config),
-        config
-      ).retryDueAgsPublishAttempts(25, { courseId: "pact" });
-
-      expect(retryResult).toMatchObject({ scanned: 1, retried: 1, failed: 0, exhausted: 0 });
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
-        "http://lms.example.test/api/v1/lti/ags/lineitems/completion-gated/scores",
-        expect.objectContaining({
-          method: "POST",
-          headers: expect.objectContaining({ Authorization: "Bearer completion-ags-token" })
-        })
-      );
-      const attempts = await db.collection("test_pactAgsPublishAttempts")
-        .find({ contentId: "completion-gated-attempt-content", userId: launchResponse.body.user.id })
-        .toArray();
-      expect(attempts).toHaveLength(1);
-      expect(attempts[0]).toMatchObject({ status: "published", retryCount: 1 });
-      expect(JSON.stringify(attempts)).not.toContain("completion-ags-token");
+      expect(JSON.stringify(queuedAttempts)).not.toContain("completion-ags-token");
       await expect(db.collection("test_pactScores").findOne({
         userId: launchResponse.body.user.id,
         contentId: "completion-gated-attempt-content"
