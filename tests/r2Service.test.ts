@@ -38,6 +38,43 @@ describe("R2 service", () => {
     }
   });
 
+  it("follows R2 continuation tokens when listing documents", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        `<ListBucketResult>
+          <Contents>
+            <Key>decks/one.pptx</Key>
+            <LastModified>2026-05-18T00:00:00.000Z</LastModified>
+            <Size>100</Size>
+          </Contents>
+          <NextContinuationToken>page-2-token</NextContinuationToken>
+        </ListBucketResult>`,
+        { status: 200 }
+      ))
+      .mockResolvedValueOnce(new Response(
+        `<ListBucketResult>
+          <Contents>
+            <Key>decks/two.pptx</Key>
+            <LastModified>2026-05-18T00:01:00.000Z</LastModified>
+            <Size>200</Size>
+          </Contents>
+        </ListBucketResult>`,
+        { status: 200 }
+      ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const documents = await listR2Documents(r2Config, "decks/");
+
+      expect(documents.map((document) => document.key)).toEqual(["decks/one.pptx", "decks/two.pptx"]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const secondUrl = new URL(String(fetchMock.mock.calls[1][0]));
+      expect(secondUrl.searchParams.get("continuation-token")).toBe("page-2-token");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("strips the bucket prefix before signing object URLs", () => {
     const url = new URL(presignR2GetObject(
       r2Config,

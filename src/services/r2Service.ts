@@ -65,14 +65,34 @@ function buildCanonicalQueryString(params: Record<string, string>): string {
 }
 
 export async function listR2Documents(config: R2Config, prefix?: string): Promise<R2DocumentItem[]> {
-  const host = r2Host(config);
+  const contents: ParsedContent[] = [];
+  let continuationToken: string | undefined;
   const now = new Date();
+
+  do {
+    const page = await listR2DocumentPage(config, prefix, continuationToken, now);
+    contents.push(...page.contents);
+    continuationToken = page.nextContinuationToken;
+  } while (continuationToken);
+
+  return contents.map((item) => ({
+    ...item,
+    downloadUrl: presignR2GetObject(config, item.key, { expiresIn: 3600, now })
+  }));
+}
+
+async function listR2DocumentPage(config: R2Config, prefix: string | undefined, continuationToken: string | undefined, now: Date): Promise<{
+  contents: ParsedContent[];
+  nextContinuationToken?: string;
+}> {
+  const host = r2Host(config);
   const date = isoDate(now);
   const datetime = isoDateTime(now);
   const normalizedPrefix = prefix ? normalizeR2ObjectKey(config, prefix) : undefined;
 
   const queryParams: Record<string, string> = { "list-type": "2" };
   if (normalizedPrefix) queryParams["prefix"] = normalizedPrefix;
+  if (continuationToken) queryParams["continuation-token"] = continuationToken;
   const canonicalQuery = buildCanonicalQueryString(queryParams);
 
   const canonicalHeaders = `host:${host}\nx-amz-content-sha256:${EMPTY_HASH}\nx-amz-date:${datetime}\n`;
@@ -103,12 +123,10 @@ export async function listR2Documents(config: R2Config, prefix?: string): Promis
   }
 
   const xml = await response.text();
-  const contents = parseContents(xml);
-
-  return contents.map((item) => ({
-    ...item,
-    downloadUrl: presignR2GetObject(config, item.key, { expiresIn: 3600, now })
-  }));
+  return {
+    contents: parseContents(xml),
+    nextContinuationToken: extractXml(xml, "NextContinuationToken")
+  };
 }
 
 export async function putR2Object(config: R2Config, input: {

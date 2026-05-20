@@ -30,13 +30,7 @@ export class DeckImportService {
       throw new AppError(404, "DECK_FILES_NOT_FOUND", "No slide deck files were found for that R2 prefix");
     }
 
-    const deck = {
-      unlocked: content.deck?.unlocked ?? false,
-      prefix,
-      importedAt: new Date().toISOString(),
-      files: deckDocuments.sort((left, right) => left.key.localeCompare(right.key)).map(deckFileFromDocument),
-      instructorGuideFiles: instructorGuideDocuments.sort((left, right) => left.key.localeCompare(right.key)).map(deckFileFromDocument)
-    };
+    const deck = deckFromDocuments(content, prefix, deckDocuments, instructorGuideDocuments);
     const updated = await this.repository.updateContentDeck({ contentId, deck, session });
     return { content: updated, imported: deck.files.length };
   }
@@ -54,6 +48,30 @@ export class DeckImportService {
   }
 }
 
+export function deckFromDocuments(
+  content: { deck?: { unlocked: boolean } },
+  prefix: string,
+  deckDocuments: R2DocumentItem[],
+  instructorGuideDocuments: R2DocumentItem[]
+) {
+  return {
+    unlocked: content.deck?.unlocked ?? false,
+    prefix,
+    importedAt: new Date().toISOString(),
+    files: deckDocuments.sort((left, right) => left.key.localeCompare(right.key)).map(deckFileFromDocument),
+    instructorGuideFiles: instructorGuideDocuments.sort((left, right) => left.key.localeCompare(right.key)).map(deckFileFromDocument)
+  };
+}
+
+export function isDeckFile(key: string) {
+  return [".ppt", ".pptx", ".pdf"].some((extension) => key.toLowerCase().endsWith(extension));
+}
+
+export function isInstructorGuideFile(key: string) {
+  const lower = key.toLowerCase();
+  return /\.(docx?|pdf)$/i.test(lower) && (lower.includes("instructor") || lower.includes("guide") || lower.includes("lesson_plan") || lower.includes("lesson-plan"));
+}
+
 function deckFileFromDocument(document: R2DocumentItem) {
   return {
     key: document.key,
@@ -61,15 +79,6 @@ function deckFileFromDocument(document: R2DocumentItem) {
     description: document.key,
     contentType: contentTypeFromR2Key(document.key)
   };
-}
-
-function isDeckFile(key: string) {
-  return [".ppt", ".pptx", ".pdf"].some((extension) => key.toLowerCase().endsWith(extension));
-}
-
-function isInstructorGuideFile(key: string) {
-  const lower = key.toLowerCase();
-  return /\.(docx?|pdf)$/i.test(lower) && (lower.includes("instructor") || lower.includes("guide") || lower.includes("lesson_plan") || lower.includes("lesson-plan"));
 }
 
 function titleFromR2Key(key: string) {

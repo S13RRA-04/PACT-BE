@@ -322,8 +322,8 @@ export class PactService {
       throw new AppError(404, "AGS_ATTEMPT_NOT_FOUND", "AGS publish attempt was not found");
     }
 
-    if (attempt.status !== "failed" && attempt.status !== "pending") {
-      throw new AppError(409, "AGS_ATTEMPT_NOT_RETRYABLE", "Only failed or pending AGS publish attempts can be retried");
+    if (attempt.status !== "failed" && attempt.status !== "pending" && attempt.status !== "retry_exhausted") {
+      throw new AppError(409, "AGS_ATTEMPT_NOT_RETRYABLE", "Only failed, pending, or retry-exhausted AGS publish attempts can be retried");
     }
 
     const [user, content] = await Promise.all([
@@ -471,6 +471,9 @@ export class PactService {
     const user = await this.repository.requireUser(session.userId);
     const content = this.prepareContentForUser(user, await this.repository.requireContent(input.contentId));
     this.requireLearnerContentAccess(user, content);
+    if (isSquadCompletionContent(content)) {
+      throw new AppError(400, "INDIVIDUAL_SCORE_UNSUPPORTED", "Modules and assessments are individually scored; all other content must be submitted as squad score");
+    }
 
     if (input.score > (input.maxScore ?? content.maxScore)) {
       throw new AppError(400, "INVALID_SCORE", "Score cannot exceed max score");
@@ -580,6 +583,9 @@ export class PactService {
     const user = await this.repository.requireUser(session.userId);
     const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
     this.requireLearnerContentAccess(user, content);
+    if (isSquadCompletionContent(content)) {
+      throw new AppError(400, "INDIVIDUAL_PROGRESS_UNSUPPORTED", "Modules and assessments use individual progress; all other content must use squad progress");
+    }
     const existingProgress = (await this.repository.listProgressForUser(user, [content.id]))[0];
     if (content.type === "assessment" && existingProgress?.status === "submitted") {
       throw new AppError(409, "ASSESSMENT_ALREADY_SUBMITTED", "Assessment has already been submitted");
@@ -623,6 +629,9 @@ export class PactService {
     const content = this.prepareContentForUser(user, await this.repository.requireContent(contentId));
     this.requireLearnerContentAccess(user, content);
     const isSquadContent = isSquadCompletionContent(content);
+    if (isSquadContent && !user.squadId) {
+      throw new AppError(409, "SQUAD_REQUIRED", "A squad assignment is required for squad progress");
+    }
     const existingProgress = isSquadContent && user.squadId
       ? (await this.repository.listProgressForSquad(user, [content.id]))[0]
       : (await this.repository.listProgressForUser(user, [content.id]))[0];
@@ -696,7 +705,7 @@ export class PactService {
   private requireSquadContentAccess(user: PactUser, content: PactContent) {
     this.requireLearnerContentAccess(user, content);
     if (!isSquadCompletionContent(content)) {
-      throw new AppError(400, "SQUAD_PROGRESS_UNSUPPORTED", "Squad progress is only supported for challenges, workshops, and capstones");
+      throw new AppError(400, "SQUAD_PROGRESS_UNSUPPORTED", "Squad progress is only supported for content outside modules and assessments");
     }
     if (!user.squadId) {
       throw new AppError(409, "SQUAD_REQUIRED", "A squad assignment is required for squad progress");
@@ -912,6 +921,25 @@ export class PactService {
     const scoreValue = completion.score;
     const maxScore = completion.maxScore;
     const submittedAt = new Date().toISOString();
+    if (isSquadCompletionContent(content) && user.squadId) {
+      const progress = await this.repository.upsertSquadContentProgress({
+        user,
+        content,
+        progressPercent: 100,
+        status: "submitted",
+        submittedAt,
+        score: scoreValue,
+        maxScore
+      });
+      await this.propagateSquadScoreToMembers(user, content, {
+        score: scoreValue,
+        maxScore,
+        progressPercent: 100
+      });
+      const score = await this.repository.getScoreForUserContent(user.id, content.id);
+      return { score: score ?? undefined, progress, completion };
+    }
+
     const [existingScore, existingProgress] = await Promise.all([
       this.repository.getScoreForUserContent(user.id, content.id),
       this.repository.listProgressForUser(user, [content.id]).then((items) => items[0])
@@ -1245,7 +1273,7 @@ function isFullCreditManualGrade(score: number, maxScore: number) {
 }
 
 function isSquadCompletionContent(content: PactContent) {
-  return content.type === "challenge" || content.type === "workshop" || content.type === "capstone";
+  return content.type !== "module" && content.type !== "assessment";
 }
 
 function agsBackfillKey(input: { userId: string; contentId: string; score: number; maxScore: number; progressPercent: number }) {

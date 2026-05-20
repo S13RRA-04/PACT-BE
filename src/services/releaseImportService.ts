@@ -60,7 +60,7 @@ export class ReleaseImportService {
   }
 }
 
-function challengeMechanicsFor(content: PactContent): ChallengeMechanics {
+export function challengeMechanicsFor(content: PactContent): ChallengeMechanics {
   if (content.mechanics?.kind === "challenge_path") return content.mechanics;
   return {
     kind: "challenge_path",
@@ -71,7 +71,7 @@ function challengeMechanicsFor(content: PactContent): ChallengeMechanics {
   };
 }
 
-function mergeChallengeReleases(mechanics: ChallengeMechanics, documents: R2DocumentItem[]): ChallengeMechanics {
+export function mergeChallengeReleases(mechanics: ChallengeMechanics, documents: R2DocumentItem[]): ChallengeMechanics {
   const existing = new Map((mechanics.releases ?? []).map((release) => [release.id, release]));
   const grouped = new Map<string, R2DocumentItem[]>();
   for (const document of documents) {

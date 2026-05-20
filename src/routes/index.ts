@@ -19,6 +19,7 @@ import { ReleaseImportService } from "../services/releaseImportService.js";
 import { DeckImportService } from "../services/deckImportService.js";
 import { LmsRosterSyncService } from "../services/lmsRosterSyncService.js";
 import { CapstoneImportService } from "../services/capstoneImportService.js";
+import { R2ContentSyncService } from "../services/r2ContentSyncService.js";
 
 const agendaR2Prefix = "Agendas/";
 const maxAgendaUploadBytes = 25 * 1024 * 1024;
@@ -425,6 +426,15 @@ export function createApiRouter(config: AppConfig) {
     try {
       const repository = await pactRepository(config);
       res.status(200).json(await repository.lockPublishedContentForManagement(requireSession(req)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/content/r2-sync", requirePactRole("admin", "instructor"), async (req, res, next) => {
+    try {
+      const repository = await pactRepository(config);
+      res.status(200).json(await new R2ContentSyncService(repository, config).syncCourseContent(requireSession(req)));
     } catch (error) {
       next(error);
     }

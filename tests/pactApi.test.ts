@@ -122,6 +122,7 @@ describe("PACT API", () => {
       role: "learner",
       courseId: "pact",
       cohortId: "cohort-release",
+      squadId: "release-squad-1",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
@@ -161,7 +162,8 @@ describe("PACT API", () => {
       userId: "release-learner",
       role: "learner",
       courseId: "pact",
-      cohortId: "cohort-release"
+      cohortId: "cohort-release",
+      squadId: "release-squad-1"
     });
     const r2Config = {
       ...config,
@@ -201,6 +203,7 @@ describe("PACT API", () => {
           role: "learner",
           courseId: "pact-lock",
           cohortId: "cohort-lock",
+          squadId: "lock-squad-1",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         }
@@ -234,7 +237,8 @@ describe("PACT API", () => {
       userId: "locked-learner",
       role: "learner",
       courseId: "pact-lock",
-      cohortId: "cohort-lock"
+      cohortId: "cohort-lock",
+      squadId: "lock-squad-1"
     });
     const instructorToken = await new SessionService(config.pactSessionSecret).sign({
       userId: "lock-instructor",
@@ -313,7 +317,7 @@ describe("PACT API", () => {
     expect(unlockedResponse.body.map((item: { id: string }) => item.id).sort()).toEqual(["locked-explicit-content", "unlocked-content"]);
 
     await request(createApp(config, createLogger(config)))
-      .patch("/api/v1/content/locked-explicit-content/progress")
+      .patch("/api/v1/content/locked-explicit-content/squad-progress")
       .set("authorization", `Bearer ${learnerToken}`)
       .send({ progressPercent: 25 })
       .expect(200);
@@ -1504,7 +1508,7 @@ describe("PACT API", () => {
       const response = await request(createApp(r2Config, createLogger(r2Config)))
         .post("/api/v1/admin/content/release-import-challenge/releases/import")
         .set("authorization", `Bearer ${instructorToken}`)
-        .send({ prefix: "pact/scenarios/brokered-exit/Student/Case Files/" })
+        .send({ prefix: "scenarios/brokered-exit/Student/Case Files/" })
         .expect(200);
 
       expect(response.body).toMatchObject({ imported: 2, releases: 2 });
@@ -1582,6 +1586,113 @@ describe("PACT API", () => {
 
       const persisted = await db.collection("test_pactContent").findOne({ id: "release-import-empty-challenge" });
       expect(persisted?.mechanics).toEqual(originalMechanics);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("syncs existing content delivery attachments from R2", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactContent").insertMany([
+      {
+        ...publishedContent("r2-sync-challenge", "cohort-r2-sync", "learner", "published", "challenge", false),
+        mechanics: {
+          kind: "challenge_path",
+          title: "R2 Sync Challenge",
+          prompt: "Review synchronized releases.",
+          releases: [
+            {
+              id: "release_R0",
+              title: "Release R0",
+              summary: "Existing release.",
+              unlocked: true,
+              files: [{ key: "scenarios/sync/Student/Case Files/release_R0/old.txt", title: "Old" }]
+            }
+          ],
+          paths: [{ id: "develop", label: "Develop", detail: "Build the case.", score: 100 }]
+        },
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        ...publishedContent("r2-sync-deck", "cohort-r2-sync", "learner", "published", "module", false),
+        deck: {
+          unlocked: true,
+          prefix: "decks/R2 Sync/",
+          importedAt: now,
+          files: [{ key: "decks/R2 Sync/old.pptx", title: "Old" }]
+        },
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+
+    const instructorToken = await new SessionService(config.pactSessionSecret).sign({
+      userId: "r2-sync-instructor",
+      role: "instructor",
+      courseId: "pact",
+      cohortId: "cohort-r2-sync"
+    });
+    const r2Config = {
+      ...config,
+      r2Endpoint: "https://test-account.r2.cloudflarestorage.com",
+      r2AccessKeyId: "test-access",
+      r2SecretAccessKey: "test-secret",
+      r2BucketName: "pact"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      const prefix = url.searchParams.get("prefix");
+      if (prefix === "scenarios/sync/Student/Case Files/") {
+        return new Response(`
+          <ListBucketResult>
+            <Contents><Key>scenarios/sync/Student/Case Files/release_R0/old.txt</Key><LastModified>2026-05-18T12:00:00.000Z</LastModified><ETag>"old"</ETag><Size>128</Size></Contents>
+            <Contents><Key>scenarios/sync/Student/Case Files/release_R1/new.eml</Key><LastModified>2026-05-18T12:05:00.000Z</LastModified><ETag>"new"</ETag><Size>256</Size></Contents>
+          </ListBucketResult>
+        `, { status: 200 });
+      }
+      if (prefix === "decks/R2 Sync/") {
+        return new Response(`
+          <ListBucketResult>
+            <Contents><Key>decks/R2 Sync/new deck.pptx</Key><LastModified>2026-05-18T12:10:00.000Z</LastModified><ETag>"deck"</ETag><Size>512</Size></Contents>
+            <Contents><Key>decks/R2 Sync/instructor guide.docx</Key><LastModified>2026-05-18T12:11:00.000Z</LastModified><ETag>"guide"</ETag><Size>256</Size></Contents>
+          </ListBucketResult>
+        `, { status: 200 });
+      }
+      return new Response("<ListBucketResult />", { status: 200 });
+    });
+
+    try {
+      const response = await request(createApp(r2Config, createLogger(r2Config)))
+        .post("/api/v1/admin/content/r2-sync")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .send({})
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        scanned: expect.any(Number),
+        synced: 2,
+        releaseFiles: 2,
+        deckFiles: 1
+      });
+      expect(response.body.content.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining(["r2-sync-challenge", "r2-sync-deck"]));
+
+      const challenge = await db.collection("test_pactContent").findOne({ id: "r2-sync-challenge" });
+      expect(challenge?.mechanics.releases).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: "release_R1",
+          files: [expect.objectContaining({ key: "scenarios/sync/Student/Case Files/release_R1/new.eml" })]
+        })
+      ]));
+
+      const deck = await db.collection("test_pactContent").findOne({ id: "r2-sync-deck" });
+      expect(deck?.deck.files).toEqual([expect.objectContaining({ key: "decks/R2 Sync/new deck.pptx" })]);
+      expect(deck?.deck.instructorGuideFiles).toEqual([expect.objectContaining({ key: "decks/R2 Sync/instructor guide.docx" })]);
+
+      const listedPrefixes = fetchMock.mock.calls.map((call) => new URL(String(call[0])).searchParams.get("prefix"));
+      expect(listedPrefixes).toContain("scenarios/sync/Student/Case Files/");
+      expect(listedPrefixes).toContain("decks/R2 Sync/");
     } finally {
       fetchMock.mockRestore();
     }
@@ -3496,6 +3607,21 @@ describe("PACT API", () => {
         createdAt: now
       },
       {
+        id: "ags-retry-exhausted",
+        courseId: "pact-ags-retry",
+        cohortId: "cohort-a",
+        userId: "ags-retry-learner",
+        contentId: "ags-retry-content",
+        lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/retry-1",
+        score: 7,
+        maxScore: 10,
+        progressPercent: 100,
+        status: "retry_exhausted",
+        retryCount: 3,
+        errorCode: "AGS_PUBLISH_FAILED",
+        createdAt: now
+      },
+      {
         id: "ags-retry-other-course",
         courseId: "other-course",
         cohortId: "cohort-a",
@@ -3553,6 +3679,24 @@ describe("PACT API", () => {
           agsStatus: "published"
         }
       });
+
+      const exhaustedResponse = await request(createApp(config, createLogger(config)))
+        .post("/api/v1/admin/diagnostics/ags-publish-attempts/ags-retry-exhausted/retry")
+        .set("authorization", `Bearer ${instructorToken}`)
+        .send({ agsAccessToken: "retry-token" })
+        .expect(200);
+
+      expect(exhaustedResponse.body).toMatchObject({
+        agsStatus: "published",
+        score: {
+          userId: "ags-retry-learner",
+          contentId: "ags-retry-content",
+          score: 7,
+          maxScore: 10,
+          progressPercent: 100,
+          agsStatus: "published"
+        }
+      });
       expect(fetchMock).toHaveBeenCalledWith(
         "http://lms.example.test/api/v1/lti/ags/lineitems/retry-1/scores",
         expect.objectContaining({
@@ -3565,10 +3709,14 @@ describe("PACT API", () => {
         .find({ courseId: "pact-ags-retry", contentId: "ags-retry-content" })
         .sort({ createdAt: 1 })
         .toArray();
-      expect(attempts).toHaveLength(1);
-      expect(attempts[0]).toMatchObject({ status: "published" });
+      expect(attempts).toHaveLength(2);
+      expect(attempts).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "ags-retry-failed", status: "published" }),
+        expect.objectContaining({ id: "ags-retry-exhausted", status: "published", retryCount: 4 })
+      ]));
       expect(JSON.stringify(attempts)).not.toContain("retry-token");
       expect(JSON.stringify(response.body)).not.toContain("retry-token");
+      expect(JSON.stringify(exhaustedResponse.body)).not.toContain("retry-token");
     } finally {
       fetchMock.mockRestore();
     }
@@ -3654,7 +3802,7 @@ describe("PACT API", () => {
     expect(JSON.stringify(progressResponse.body)).not.toContain("unknown-question");
 
     const gameProgressResponse = await request(createApp(config, createLogger(config)))
-      .patch("/api/v1/content/progress-game/progress")
+      .patch("/api/v1/content/progress-game/squad-progress")
       .set("authorization", `Bearer ${token}`)
       .send({
         mechanicsState: {
@@ -3667,7 +3815,10 @@ describe("PACT API", () => {
       .expect(200);
 
     expect(gameProgressResponse.body).toMatchObject({
-      userId: "user-1",
+      userId: "squad:squad-1",
+      scope: "squad",
+      squadId: "squad-1",
+      updatedByUserId: "user-1",
       contentId: "progress-game",
       status: "in_progress",
       progressPercent: 50,
@@ -3680,7 +3831,15 @@ describe("PACT API", () => {
       .expect(200);
 
     expect(listResponse.body.progress).toEqual(expect.arrayContaining([
-      expect.objectContaining({ contentId: "progress-content", progressPercent: 50 }),
+      expect.objectContaining({ contentId: "progress-content", progressPercent: 50 })
+    ]));
+
+    const squadListResponse = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/content/squad-progress")
+      .set("authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(squadListResponse.body.progress).toEqual(expect.arrayContaining([
       expect.objectContaining({ contentId: "progress-game", progressPercent: 50, mechanicsState: { kind: "packet_capture", capturedNodeIds: ["dns"] } })
     ]));
 
@@ -3699,7 +3858,7 @@ describe("PACT API", () => {
     });
   });
 
-  it("persists challenge and workshop progress as one shared squad record", async () => {
+  it("persists non-module and non-assessment progress as one shared squad record", async () => {
     const db = await getMongoDb(config);
     const now = new Date().toISOString();
     await db.collection("test_pactUsers").insertMany([
@@ -3745,6 +3904,7 @@ describe("PACT API", () => {
         }
       },
       publishedContent("squad-progress-workshop", "cohort-squad-progress", "learner", "published", "workshop"),
+      publishedContent("squad-progress-game", "cohort-squad-progress", "learner", "published", "game"),
       publishedContent("squad-progress-module", "cohort-squad-progress", "learner", "published", "module")
     ]);
     const learnerAToken = await new SessionService(config.pactSessionSecret).sign({
@@ -3824,10 +3984,10 @@ describe("PACT API", () => {
       agsStatus: "not_applicable"
     });
 
-    const squadProgressRecords = await db.collection("test_pactContentProgress")
+    const initialSquadProgressRecords = await db.collection("test_pactContentProgress")
       .find({ scope: "squad", squadId: "squad-progress-1" })
       .toArray();
-    expect(squadProgressRecords).toHaveLength(2);
+    expect(initialSquadProgressRecords).toHaveLength(2);
     const memberScores = await db.collection("test_pactScores")
       .find({ contentId: "squad-progress-workshop" })
       .sort({ userId: 1 })
@@ -3836,14 +3996,60 @@ describe("PACT API", () => {
     expect(memberScores.map((score) => score.userId)).toEqual(["squad-progress-a", "squad-progress-b"]);
     expect(memberScores.every((score) => score.agsStatus === "not_applicable")).toBe(true);
 
+    const gameProgress = await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/squad-progress-game/squad-progress")
+      .set("authorization", `Bearer ${learnerAToken}`)
+      .send({ progressPercent: 40, status: "in_progress" })
+      .expect(200);
+
+    expect(gameProgress.body).toMatchObject({
+      scope: "squad",
+      updatedByUserId: "squad-progress-a",
+      squadId: "squad-progress-1",
+      contentId: "squad-progress-game",
+      contentType: "game",
+      progressPercent: 40,
+      status: "in_progress"
+    });
+
+    await request(createApp(config, createLogger(config)))
+      .post("/api/v1/scores")
+      .set("authorization", `Bearer ${learnerAToken}`)
+      .send({ contentId: "squad-progress-game", score: 7, maxScore: 10, progressPercent: 100 })
+      .expect(400);
+
+    const gameScore = await request(createApp(config, createLogger(config)))
+      .post("/api/v1/content/squad-progress-game/squad-score")
+      .set("authorization", `Bearer ${learnerAToken}`)
+      .send({ score: 7, maxScore: 10, progressPercent: 100 })
+      .expect(201);
+
+    expect(gameScore.body).toMatchObject({
+      scope: "squad",
+      updatedByUserId: "squad-progress-a",
+      squadId: "squad-progress-1",
+      contentId: "squad-progress-game",
+      contentType: "game",
+      status: "submitted",
+      score: 7,
+      maxScore: 10,
+      progressPercent: 100
+    });
+
     const listResponse = await request(createApp(config, createLogger(config)))
       .get("/api/v1/content/squad-progress")
       .set("authorization", `Bearer ${learnerAToken}`)
       .expect(200);
     expect(listResponse.body.progress.map((item: { contentId: string }) => item.contentId).sort()).toEqual([
       "squad-progress-challenge",
+      "squad-progress-game",
       "squad-progress-workshop"
     ]);
+
+    const squadProgressRecords = await db.collection("test_pactContentProgress")
+      .find({ scope: "squad", squadId: "squad-progress-1" })
+      .toArray();
+    expect(squadProgressRecords).toHaveLength(3);
 
     await request(createApp(config, createLogger(config)))
       .patch("/api/v1/content/squad-progress-module/squad-progress")
@@ -3960,6 +4166,17 @@ describe("PACT API", () => {
       contentId: "capstone-squad-review"
     });
     expect(learnerBProgress).toBeNull();
+
+    const squadMemberScores = await db.collection("test_pactScores")
+      .find({ contentId: "capstone-squad-review" })
+      .sort({ userId: 1 })
+      .toArray();
+    expect(squadMemberScores).toHaveLength(2);
+    expect(squadMemberScores.map((score) => score.userId)).toEqual(["capstone-squad-a", "capstone-squad-b"]);
+    expect(squadMemberScores).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: "capstone-squad-a", score: 2, maxScore: 2, progressPercent: 100, agsStatus: "not_applicable" }),
+      expect.objectContaining({ userId: "capstone-squad-b", score: 2, maxScore: 2, progressPercent: 100, agsStatus: "not_applicable" })
+    ]));
   });
 
   it("records per-question attempts and exposes instructor review without LMS user IDs", async () => {
