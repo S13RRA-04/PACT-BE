@@ -887,31 +887,66 @@ export class PactRepository {
 
   async listSubmittedUserProgressForAgsBackfill(input: { courseId: string; cohortId?: string; limit: number }) {
     return this.contentProgress()
-      .find({
-        courseId: input.courseId,
-        ...(input.cohortId ? { cohortId: input.cohortId } : {}),
-        status: "submitted",
-        score: { $exists: true },
-        maxScore: { $exists: true },
-        $or: [{ scope: "user" }, { scope: { $exists: false } }]
-      })
-      .project<Omit<PactContentProgress, "_id">>({ _id: 0 })
-      .sort({ submittedAt: -1, updatedAt: -1 })
-      .limit(input.limit)
+      .aggregate<Omit<PactContentProgress, "_id">>([
+        { $match: this.submittedProgressBackfillMatch(input) },
+        this.withoutTerminalAgsAttemptLookup(),
+        { $match: { terminalAgsAttempt: { $size: 0 } } },
+        { $project: { _id: 0, terminalAgsAttempt: 0 } },
+        { $sort: { submittedAt: -1, updatedAt: -1 } },
+        { $limit: input.limit }
+      ])
       .toArray();
   }
 
   async listNotApplicableAgsAttemptsForBackfill(input: { courseId: string; cohortId?: string; limit: number }) {
     return this.agsPublishAttempts()
-      .find({
-        courseId: input.courseId,
-        ...(input.cohortId ? { cohortId: input.cohortId } : {}),
-        status: "not_applicable"
-      })
-      .project<Omit<PactAgsPublishAttempt, "_id">>({ _id: 0 })
-      .sort({ createdAt: -1 })
-      .limit(input.limit)
+      .aggregate<Omit<PactAgsPublishAttempt, "_id">>([
+        {
+          $match: {
+            courseId: input.courseId,
+            ...(input.cohortId ? { cohortId: input.cohortId } : {}),
+            status: "not_applicable"
+          }
+        },
+        this.withoutTerminalAgsAttemptLookup(),
+        { $match: { terminalAgsAttempt: { $size: 0 } } },
+        { $project: { _id: 0, terminalAgsAttempt: 0 } },
+        { $sort: { createdAt: -1 } },
+        { $limit: input.limit }
+      ])
       .toArray();
+  }
+
+  async countAgsBackfillCandidates(input: { courseId: string; cohortId?: string }) {
+    const [submittedProgress, notApplicableAttempts] = await Promise.all([
+      this.contentProgress()
+        .aggregate<{ count: number }>([
+          { $match: this.submittedProgressBackfillMatch(input) },
+          this.withoutTerminalAgsAttemptLookup(),
+          { $match: { terminalAgsAttempt: { $size: 0 } } },
+          { $count: "count" }
+        ])
+        .toArray(),
+      this.agsPublishAttempts()
+        .aggregate<{ count: number }>([
+          {
+            $match: {
+              courseId: input.courseId,
+              ...(input.cohortId ? { cohortId: input.cohortId } : {}),
+              status: "not_applicable"
+            }
+          },
+          this.withoutTerminalAgsAttemptLookup(),
+          { $match: { terminalAgsAttempt: { $size: 0 } } },
+          { $count: "count" }
+        ])
+        .toArray()
+    ]);
+    return {
+      submittedProgress: submittedProgress[0]?.count ?? 0,
+      notApplicableAttempts: notApplicableAttempts[0]?.count ?? 0,
+      total: (submittedProgress[0]?.count ?? 0) + (notApplicableAttempts[0]?.count ?? 0)
+    };
   }
 
   async recordManualAgsQueueProcessingAudit(input: {
@@ -1162,6 +1197,11 @@ export class PactRepository {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };
+
+    if (isSquadProgressAutosaveNoop(existing, input)) {
+      return existing;
+    }
+
     await this.contentProgress().updateOne(key, { $set: progress }, { upsert: true });
     return progress;
   }
@@ -1585,6 +1625,50 @@ export class PactRepository {
     return this.db.collection<PactNotification>(collectionName(this.config, "pactNotifications"));
   }
 
+  private submittedProgressBackfillMatch(input: { courseId: string; cohortId?: string }) {
+    return {
+      courseId: input.courseId,
+      ...(input.cohortId ? { cohortId: input.cohortId } : {}),
+      status: "submitted",
+      score: { $exists: true },
+      maxScore: { $exists: true },
+      $or: [{ scope: "user" }, { scope: { $exists: false } }]
+    };
+  }
+
+  private withoutTerminalAgsAttemptLookup() {
+    return {
+      $lookup: {
+        from: collectionName(this.config, "pactAgsPublishAttempts"),
+        let: {
+          userId: "$userId",
+          contentId: "$contentId",
+          score: "$score",
+          maxScore: "$maxScore",
+          progressPercent: "$progressPercent"
+        },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$userId", "$$userId"] },
+                  { $eq: ["$contentId", "$$contentId"] },
+                  { $eq: ["$score", "$$score"] },
+                  { $eq: ["$maxScore", "$$maxScore"] },
+                  { $eq: ["$progressPercent", "$$progressPercent"] },
+                  { $in: ["$status", ["pending", "published"]] }
+                ]
+              }
+            }
+          },
+          { $limit: 1 }
+        ],
+        as: "terminalAgsAttempt"
+      }
+    };
+  }
+
   private bugReports() {
     return this.db.collection<PactBugReport>(collectionName(this.config, "pactBugReports"));
   }
@@ -1609,6 +1693,31 @@ function startedAtFromMechanicsState(mechanicsState: PactMechanicsState | undefi
 
 function squadProgressUserId(squadId: string) {
   return `squad:${squadId}`;
+}
+
+function isSquadProgressAutosaveNoop(
+  existing: PactContentProgress | null,
+  input: {
+    answers?: Record<string, PactAnswerValue>;
+    mechanicsState?: PactMechanicsState;
+    progressPercent?: number;
+    status?: PactContentProgress["status"];
+    score?: number;
+    maxScore?: number;
+    submittedAt?: string;
+  }
+) {
+  if (!existing) return false;
+  if (input.status === "submitted" || input.score !== undefined || input.maxScore !== undefined || input.submittedAt !== undefined) return false;
+
+  return (input.progressPercent === undefined || existing.progressPercent === input.progressPercent)
+    && (input.status === undefined || existing.status === input.status)
+    && (input.answers === undefined || stableJson(existing.answers) === stableJson(input.answers))
+    && (input.mechanicsState === undefined || stableJson(existing.mechanicsState) === stableJson(input.mechanicsState));
+}
+
+function stableJson(value: unknown) {
+  return JSON.stringify(value ?? null);
 }
 
 function synthesisResponsesFromState(mechanicsState: PactMechanicsState | undefined): Record<string, string> {

@@ -72,4 +72,8 @@ External schedulers can use:
 
 `POST /api/v1/ops/ags-publish-attempts/process-due`
 
-This endpoint requires `Authorization: Bearer <AGS_PROCESS_DUE_SCHEDULER_SECRET>`, scans due items globally, and is intended for cron-like production operations where no instructor browser session exists.
+Completed-submission AGS backfill also runs through the scheduler path:
+
+`POST /api/v1/ops/ags-publish-attempts/backfill-completed`
+
+This endpoint requires `Authorization: Bearer <AGS_PROCESS_DUE_SCHEDULER_SECRET>` and a `courseId` body field. It processes bounded batches, excludes scores already pending or published, and returns `remainingCandidates` so operators can see whether another scheduled batch is needed. These ops endpoints are intended for cron-like production operations where no instructor browser session exists.

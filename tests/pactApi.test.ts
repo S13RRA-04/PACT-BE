@@ -1625,6 +1625,17 @@ describe("PACT API", () => {
         },
         createdAt: now,
         updatedAt: now
+      },
+      {
+        ...publishedContent("r2-sync-deck-shared-prefix", "cohort-r2-sync", "learner", "published", "module", false),
+        deck: {
+          unlocked: true,
+          prefix: "decks/R2 Sync/",
+          importedAt: now,
+          files: [{ key: "decks/R2 Sync/old-shared.pptx", title: "Old Shared" }]
+        },
+        createdAt: now,
+        updatedAt: now
       }
     ]);
 
@@ -1672,11 +1683,11 @@ describe("PACT API", () => {
 
       expect(response.body).toMatchObject({
         scanned: expect.any(Number),
-        synced: 2,
+        synced: 3,
         releaseFiles: 2,
-        deckFiles: 1
+        deckFiles: 2
       });
-      expect(response.body.content.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining(["r2-sync-challenge", "r2-sync-deck"]));
+      expect(response.body.content.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining(["r2-sync-challenge", "r2-sync-deck", "r2-sync-deck-shared-prefix"]));
 
       const challenge = await db.collection("test_pactContent").findOne({ id: "r2-sync-challenge" });
       expect(challenge?.mechanics.releases).toEqual(expect.arrayContaining([
@@ -1693,6 +1704,7 @@ describe("PACT API", () => {
       const listedPrefixes = fetchMock.mock.calls.map((call) => new URL(String(call[0])).searchParams.get("prefix"));
       expect(listedPrefixes).toContain("scenarios/sync/Student/Case Files/");
       expect(listedPrefixes).toContain("decks/R2 Sync/");
+      expect(listedPrefixes.filter((prefix) => prefix === "decks/R2 Sync/")).toHaveLength(1);
     } finally {
       fetchMock.mockRestore();
     }
@@ -2586,6 +2598,60 @@ describe("PACT API", () => {
     });
   });
 
+  it("reports usable course AGS token context when the current operator has not refreshed launch context", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertMany([
+      {
+        id: "ags-context-admin-current",
+        lmsUserId: "lms-ags-context-admin-current",
+        role: "admin",
+        courseId: "pact-ags-context",
+        cohortId: "cohort-a",
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: "ags-context-admin-refreshed",
+        lmsUserId: "lms-ags-context-admin-refreshed",
+        role: "admin",
+        courseId: "pact-ags-context",
+        cohortId: "cohort-a",
+        createdAt: now,
+        updatedAt: now
+      }
+    ]);
+    await db.collection("test_pactAgsContexts").insertOne({
+      id: "ags-context-latest",
+      userId: "ags-context-admin-refreshed",
+      courseId: "pact-ags-context",
+      cohortId: "cohort-a",
+      lineItemsUrl: "http://lms.example.test/api/v1/lti/ags/lineitems",
+      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      createdAt: now,
+      updatedAt: now
+    });
+    const token = await new SessionService(config.pactSessionSecret).sign({
+      userId: "ags-context-admin-current",
+      role: "admin",
+      courseId: "pact-ags-context",
+      cohortId: "cohort-a"
+    });
+
+    const response = await request(createApp(config, createLogger(config)))
+      .get("/api/v1/admin/diagnostics/ags-token-context")
+      .set("authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      courseId: "pact-ags-context",
+      cohortId: "cohort-a",
+      hasLaunchContext: true,
+      hasScoreScope: true,
+      lineItemsUrl: "http://lms.example.test/api/v1/lti/ags/lineitems"
+    });
+  });
+
   it("durably retries due AGS attempts by acquiring a fresh server-side token", async () => {
     const db = await getMongoDb(config);
     const now = new Date().toISOString();
@@ -3267,6 +3333,85 @@ describe("PACT API", () => {
       await expect(db.collection("test_pactAgsPublishAttempts").findOne({ id: "ags-scheduler-due" }))
         .resolves.toMatchObject({ status: "published", retryCount: 1 });
       expect(JSON.stringify(await db.collection("test_pactAgsPublishAttempts").findOne({ id: "ags-scheduler-due" }))).not.toContain("scheduler-ags-token");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("lets external schedulers backfill completed AGS submissions with remaining candidate counts", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertOne({
+      id: "ags-scheduler-backfill-learner",
+      lmsUserId: "lms-ags-scheduler-backfill-learner",
+      role: "learner",
+      courseId: "pact-ags-scheduler-backfill",
+      cohortId: "cohort-a",
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("ags-scheduler-backfill-content", "cohort-a", "learner", "published", "module"),
+      courseId: "pact-ags-scheduler-backfill",
+      lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/scheduler-backfill-lineitem"
+    });
+    await db.collection("test_pactAgsContexts").insertOne({
+      id: "ags-scheduler-backfill-context",
+      courseId: "pact-ags-scheduler-backfill",
+      cohortId: "cohort-a",
+      userId: "ags-scheduler-backfill-learner",
+      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContentProgress").insertOne({
+      id: "ags-scheduler-backfill-progress",
+      scope: "user",
+      courseId: "pact-ags-scheduler-backfill",
+      cohortId: "cohort-a",
+      userId: "ags-scheduler-backfill-learner",
+      contentId: "ags-scheduler-backfill-content",
+      contentType: "module",
+      answers: {},
+      answeredQuestionIds: [],
+      progressPercent: 100,
+      score: 9,
+      maxScore: 10,
+      status: "submitted",
+      submittedAt: now,
+      createdAt: now,
+      updatedAt: now
+    });
+    const schedulerConfig = {
+      ...config,
+      agsProcessDueSchedulerSecret: "scheduler-secret-with-enough-length"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ access_token: "scheduler-backfill-ags-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    try {
+      await request(createApp(schedulerConfig, createLogger(config)))
+        .post("/api/v1/ops/ags-publish-attempts/backfill-completed")
+        .set("authorization", "Bearer wrong-secret")
+        .send({ courseId: "pact-ags-scheduler-backfill", limit: 1 })
+        .expect(401);
+
+      const response = await request(createApp(schedulerConfig, createLogger(config)))
+        .post("/api/v1/ops/ags-publish-attempts/backfill-completed")
+        .set("authorization", "Bearer scheduler-secret-with-enough-length")
+        .send({ courseId: "pact-ags-scheduler-backfill", limit: 1 })
+        .expect(200);
+
+      expect(response.body).toMatchObject({ scanned: 1, queued: 0, published: 1, skipped: 0, failed: 0, remainingCandidates: 0 });
+      await expect(db.collection("test_pactAgsPublishAttempts").findOne({
+        userId: "ags-scheduler-backfill-learner",
+        contentId: "ags-scheduler-backfill-content"
+      })).resolves.toMatchObject({ status: "published", score: 9, maxScore: 10 });
+      expect(JSON.stringify(await db.collection("test_pactAgsPublishAttempts").findOne({
+        userId: "ags-scheduler-backfill-learner",
+        contentId: "ags-scheduler-backfill-content"
+      }))).not.toContain("scheduler-backfill-ags-token");
     } finally {
       fetchMock.mockRestore();
     }
@@ -4036,6 +4181,24 @@ describe("PACT API", () => {
       squadId: "squad-progress-1",
       contentId: "squad-progress-challenge",
       mechanicsState: { synthesisResponses: { summary: "Shared answer" } }
+    });
+
+    const repeatedAutosave = await request(createApp(config, createLogger(config)))
+      .patch("/api/v1/content/squad-progress-challenge/squad-progress")
+      .set("authorization", `Bearer ${learnerBToken}`)
+      .send({
+        mechanicsState: {
+          synthesisResponses: { summary: "Shared answer" }
+        },
+        progressPercent: 60,
+        status: "in_progress"
+      })
+      .expect(200);
+
+    expect(repeatedAutosave.body).toMatchObject({
+      id: challengeProgress.body.id,
+      updatedByUserId: "squad-progress-a",
+      updatedAt: challengeProgress.body.updatedAt
     });
 
     const workshopScore = await request(createApp(config, createLogger(config)))

@@ -294,13 +294,19 @@ export const schedulerAgsProcessDueSchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(25)
 });
 
+export const schedulerAgsBackfillSchema = z.object({
+  courseId: z.string().min(1),
+  cohortId: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50)
+});
+
 export const agsPublishRetrySchema = z.object({
   agsAccessToken: z.string().min(1).optional()
 });
 
 export const agsBackfillSchema = z.object({
   cohortId: z.string().min(1).optional(),
-  limit: z.coerce.number().int().min(1).max(1000).default(500)
+  limit: z.coerce.number().int().min(1).max(100).default(50)
 });
 
 export const bugReportCreateSchema = z.object({

@@ -10,7 +10,7 @@ import { LtiLaunchService } from "../services/ltiLaunchService.js";
 import { DeepLinkingService } from "../services/deepLinkingService.js";
 import { PactService } from "../services/pactService.js";
 import { ToolKeyService } from "../services/toolKeyService.js";
-import { agendaUploadSchema, agsBackfillSchema, agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, capstoneImportSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, deckImportSchema, deckLockUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, contentSubmissionScoreSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, releaseImportSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
+import { agendaUploadSchema, agsBackfillSchema, agsPublishAttemptExportQuerySchema, agsPublishAttemptQuerySchema, agsPublishRetrySchema, auditEventQuerySchema, bugReportCreateSchema, capstoneImportSchema, contentAssignmentUpdateSchema, contentCreateSchema, contentLmsLabelUpdateSchema, contentLockUpdateSchema, contentMechanicsUpdateSchema, contentProgressUpdateSchema, contentStatusUpdateSchema, deckImportSchema, deckLockUpdateSchema, ltiDeepLinkSchema, ltiLaunchSchema, manualQuestionGradeSchema, contentSubmissionScoreSchema, notificationDiagnosticQuerySchema, questionAttemptQuerySchema, questionAttemptSubmitSchema, releaseImportSchema, schedulerAgsBackfillSchema, schedulerAgsProcessDueSchema, scoreSubmitSchema, squadAssignmentSchema, squadCreateSchema } from "../validators/schemas.js";
 import { AppError } from "../errors/AppError.js";
 import type { ContentType } from "../domain/types.js";
 import { listR2Documents, presignR2GetObject, putR2Object } from "../services/r2Service.js";
@@ -59,6 +59,16 @@ export function createApiRouter(config: AppConfig) {
       requireSchedulerSecret(config, req);
       const input = schedulerAgsProcessDueSchema.parse(req.body ?? {});
       res.status(200).json(await pactService(config).then((service) => service.retryDueAgsPublishAttempts(input.limit)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/ops/ags-publish-attempts/backfill-completed", async (req, res, next) => {
+    try {
+      requireSchedulerSecret(config, req);
+      const input = schedulerAgsBackfillSchema.parse(req.body ?? {});
+      res.status(200).json(await pactService(config).then((service) => service.backfillCompletedAgsSubmissions(input)));
     } catch (error) {
       next(error);
     }
@@ -434,7 +444,7 @@ export function createApiRouter(config: AppConfig) {
   router.post("/admin/content/r2-sync", requirePactRole("admin", "instructor"), async (req, res, next) => {
     try {
       const repository = await pactRepository(config);
-      res.status(200).json(await new R2ContentSyncService(repository, config).syncCourseContent(requireSession(req)));
+      res.status(200).json(await new R2ContentSyncService(repository, config, req.log).syncCourseContent(requireSession(req)));
     } catch (error) {
       next(error);
     }

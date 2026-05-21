@@ -24,6 +24,7 @@ type AgsBackfillResult = {
   published: number;
   skipped: number;
   failed: number;
+  remainingCandidates: number;
   skipReasons: AgsBackfillSkipReasons;
 };
 
@@ -160,6 +161,9 @@ export class PactService {
       userId: session.userId,
       courseId: session.courseId,
       cohortId: session.cohortId
+    }) ?? await this.repository.getLatestAgsContextForCourseCohort({
+      courseId: session.courseId,
+      cohortId: session.cohortId
     });
     return {
       courseId: session.courseId,
@@ -169,7 +173,11 @@ export class PactService {
       lineItemsUrl: context?.lineItemsUrl,
       lineItemUrl: context?.lineItemUrl,
       scopes: context?.scopes ?? [],
-      updatedAt: context?.updatedAt
+      updatedAt: context?.updatedAt,
+      backfillCandidates: await this.repository.countAgsBackfillCandidates({
+        courseId: session.courseId,
+        cohortId: session.cohortId
+      })
     };
   }
 
@@ -390,24 +398,37 @@ export class PactService {
     if (session.role !== "admin" && session.role !== "instructor") {
       throw new AppError(403, "PACT_ROLE_FORBIDDEN", "Instructor access is required");
     }
-    const limit = input.limit ?? 500;
+    return this.backfillCompletedAgsSubmissions({
+      courseId: session.courseId,
+      cohortId: input.cohortId,
+      limit: input.limit,
+      operatorUserId: session.userId
+    });
+  }
+
+  async backfillCompletedAgsSubmissions(input: { courseId: string; cohortId?: string; limit?: number; operatorUserId?: string }) {
+    const limit = input.limit ?? 50;
 
     const progressRecords = await this.repository.listSubmittedUserProgressForAgsBackfill({
-      courseId: session.courseId,
+      courseId: input.courseId,
       cohortId: input.cohortId,
       limit
     });
-    const notApplicableAttempts = await this.repository.listNotApplicableAgsAttemptsForBackfill({
-      courseId: session.courseId,
-      cohortId: input.cohortId,
-      limit
-    });
+    const notApplicableLimit = Math.max(0, limit - progressRecords.length);
+    const notApplicableAttempts = notApplicableLimit
+      ? await this.repository.listNotApplicableAgsAttemptsForBackfill({
+        courseId: input.courseId,
+        cohortId: input.cohortId,
+        limit: notApplicableLimit
+      })
+      : [];
     const result = {
       scanned: 0,
       queued: 0,
       published: 0,
       skipped: 0,
       failed: 0,
+      remainingCandidates: 0,
       skipReasons: {
         alreadyPublished: 0,
         alreadyPending: 0,
@@ -418,7 +439,7 @@ export class PactService {
       }
     };
     const seen = new Set<string>();
-    const operator = await this.repository.getUser(session.userId);
+    const operator = input.operatorUserId ? await this.repository.getUser(input.operatorUserId) : undefined;
 
     for (const progress of progressRecords) {
       if (typeof progress.score !== "number" || typeof progress.maxScore !== "number") {
@@ -434,7 +455,7 @@ export class PactService {
         progressPercent: progress.progressPercent
       });
       seen.add(key);
-      await this.backfillAgsCandidate(session, result, {
+      await this.backfillAgsCandidate(input, result, {
         userId: progress.userId,
         contentId: progress.contentId,
         cohortId: progress.cohortId,
@@ -453,7 +474,7 @@ export class PactService {
         continue;
       }
       seen.add(key);
-      await this.backfillAgsCandidate(session, result, {
+      await this.backfillAgsCandidate(input, result, {
         userId: attempt.userId,
         contentId: attempt.contentId,
         cohortId: attempt.cohortId,
@@ -464,6 +485,10 @@ export class PactService {
       }, operator);
     }
 
+    result.remainingCandidates = (await this.repository.countAgsBackfillCandidates({
+      courseId: input.courseId,
+      cohortId: input.cohortId
+    })).total;
     return result;
   }
 
@@ -835,7 +860,7 @@ export class PactService {
   }
 
   private async backfillAgsCandidate(
-    session: PactSession,
+    scope: { courseId: string },
     result: AgsBackfillResult,
     candidate: {
       userId: string;
@@ -870,7 +895,7 @@ export class PactService {
           status: "published"
         })
       ]);
-      if (user.courseId !== session.courseId || content.courseId !== session.courseId || user.cohortId !== candidate.cohortId) {
+      if (user.courseId !== scope.courseId || content.courseId !== scope.courseId || user.cohortId !== candidate.cohortId) {
         this.recordAgsBackfillSkip(result, "courseOrCohortMismatch");
         return;
       }

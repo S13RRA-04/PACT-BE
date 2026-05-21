@@ -123,12 +123,13 @@ Use `modules:import:production` for production imports. It forces the production
 - `GET /api/v1/admin/content` lists course content for administrator/instructor gating.
 - `PATCH /api/v1/admin/content/:contentId/status` changes content between `draft`, `published`, and `archived`.
 - `GET /api/v1/admin/r2/documents` lists configured PACT R2 bucket files for administrators and instructors.
-- `GET /api/v1/admin/diagnostics/ags-token-context` reports whether the current launch has AGS score scope for server-side token acquisition.
+- `GET /api/v1/admin/diagnostics/ags-token-context` reports whether the current launch has AGS score scope for server-side token acquisition and how many completed-submission AGS backfill candidates remain.
 - `GET /api/v1/admin/diagnostics/ags-publish-attempts` lists course-scoped AGS publish attempts for administrators and instructors.
 - `GET /api/v1/admin/diagnostics/ags-publish-attempts/export.csv` exports filtered AGS publish attempts as CSV.
 - `POST /api/v1/admin/diagnostics/ags-publish-attempts/process-due` manually processes due failed or pending AGS publish attempts for the launched course and records an audit event.
 - `POST /api/v1/admin/diagnostics/ags-publish-attempts/:attemptId/retry` retries a failed or pending AGS publish attempt for the launched course.
 - `POST /api/v1/ops/ags-publish-attempts/process-due` lets an external scheduler process due AGS publish attempts when `AGS_PROCESS_DUE_SCHEDULER_SECRET` is configured. Authenticate with `Authorization: Bearer <secret>`.
+- `POST /api/v1/ops/ags-publish-attempts/backfill-completed` lets an external scheduler backfill already-completed PACT submissions into AGS in bounded batches. Authenticate with `Authorization: Bearer <secret>` and send `courseId`, optional `cohortId`, and optional `limit`.
 
 Protected PACT endpoints use the bearer session token returned from LTI launch. Squad administration requires `admin`; content gating requires `admin` or `instructor`.
 
@@ -181,6 +182,11 @@ curl -X POST "$PACT_API_BASE_URL/api/v1/ops/ags-publish-attempts/process-due" \
   -H "authorization: Bearer $AGS_PROCESS_DUE_SCHEDULER_SECRET" \
   -H "content-type: application/json" \
   -d '{"limit":25}'
+
+curl -X POST "$PACT_API_BASE_URL/api/v1/ops/ags-publish-attempts/backfill-completed" \
+  -H "authorization: Bearer $AGS_PROCESS_DUE_SCHEDULER_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"courseId":"pact","limit":50}'
 ```
 
-The scheduler endpoint is not tied to a browser launch session. It scans due queue items globally, uses stored AGS launch context for token acquisition, and does not write instructor audit events. Instructor/admin manual processing remains course-scoped and audited through `/api/v1/admin/diagnostics/ags-publish-attempts/process-due`.
+The scheduler endpoints are not tied to a browser launch session. Queue processing scans due queue items globally. Backfill scans submitted user progress and prior `not_applicable` attempts for the requested course/cohort, excludes scores already pending or published, publishes in bounded batches, and returns `remainingCandidates` for the next scheduler run. Both paths use stored AGS launch context for token acquisition and do not write instructor audit events. Instructor/admin manual processing remains course-scoped and audited through `/api/v1/admin/diagnostics/ags-publish-attempts/process-due`.

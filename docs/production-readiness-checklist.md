@@ -32,7 +32,7 @@ Use this checklist before enabling PACT question completion, manual grading, and
 ## AGS Queue Operations
 
 - Long-running Node runtimes should enable `AGS_AUTO_RETRY_ENABLED`.
-- Non-server runtimes need an operational path for `POST /api/v1/ops/ags-publish-attempts/process-due` using `AGS_PROCESS_DUE_SCHEDULER_SECRET`.
+- Non-server runtimes need operational paths for `POST /api/v1/ops/ags-publish-attempts/process-due` and `POST /api/v1/ops/ags-publish-attempts/backfill-completed` using `AGS_PROCESS_DUE_SCHEDULER_SECRET`.
 - Operators must launch PACT from the LMS with AGS score scope before relying on server-side token acquisition.
 - `retry_exhausted` alerts are delivered to the configured operations webhook.
 - Manual retry is available for failed or pending attempts without storing AGS access tokens.
@@ -44,9 +44,14 @@ curl -X POST "$PACT_API_BASE_URL/api/v1/ops/ags-publish-attempts/process-due" \
   -H "authorization: Bearer $AGS_PROCESS_DUE_SCHEDULER_SECRET" \
   -H "content-type: application/json" \
   -d '{"limit":25}'
+
+curl -X POST "$PACT_API_BASE_URL/api/v1/ops/ags-publish-attempts/backfill-completed" \
+  -H "authorization: Bearer $AGS_PROCESS_DUE_SCHEDULER_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"courseId":"pact","limit":50}'
 ```
 
-Expected response shape: `{"scanned":0,"retried":0,"failed":0,"exhausted":0}` or non-zero counts when due queue items exist.
+Expected queue response shape: `{"scanned":0,"retried":0,"failed":0,"exhausted":0}` or non-zero counts when due queue items exist. Expected backfill response includes `remainingCandidates`; repeat scheduled batches until it reaches `0`.
 
 ## Go/No-Go
 

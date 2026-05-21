@@ -1,6 +1,10 @@
 export default {
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(processDueAgsAttempts(env, { source: "scheduled" }));
+    const jobs = [processDueAgsAttempts(env, { source: "scheduled" })];
+    if (env.AGS_BACKFILL_COURSE_ID) {
+      jobs.push(backfillCompletedAgsSubmissions(env, { source: "scheduled" }));
+    }
+    ctx.waitUntil(Promise.all(jobs));
   },
 
   async fetch(request, env) {
@@ -26,6 +30,14 @@ export default {
     if (request.method === "POST" && url.pathname === "/pact-ags-process-due") {
       const limit = clampLimit(url.searchParams.get("limit"), 500);
       const result = await processDueAgsAttempts(env, { source: "manual", limit });
+      return Response.json(result, { status: result.ok ? 200 : result.status });
+    }
+
+    if (request.method === "POST" && url.pathname === "/pact-ags-backfill-completed") {
+      const limit = clampLimit(url.searchParams.get("limit"), 100);
+      const courseId = url.searchParams.get("courseId") || env.AGS_BACKFILL_COURSE_ID;
+      const cohortId = url.searchParams.get("cohortId") || env.AGS_BACKFILL_COHORT_ID || undefined;
+      const result = await backfillCompletedAgsSubmissions(env, { source: "manual", courseId, cohortId, limit });
       return Response.json(result, { status: result.ok ? 200 : result.status });
     }
 
@@ -86,17 +98,70 @@ async function processDueAgsAttempts(env, input) {
     payload = undefined;
   }
 
+  const data = payload?.data ?? payload;
   const result = {
     ok: response.ok,
     status: response.status,
     source: input.source,
-    scanned: payload?.data?.scanned,
-    retried: payload?.data?.retried,
-    failed: payload?.data?.failed,
-    exhausted: payload?.data?.exhausted
+    scanned: data?.scanned,
+    retried: data?.retried,
+    failed: data?.failed,
+    exhausted: data?.exhausted
   };
 
   console.log(JSON.stringify({ event: "pact.ags_process_due", ...result }));
+  return result;
+}
+
+async function backfillCompletedAgsSubmissions(env, input) {
+  if (!env.PACT_API_BASE_URL || !env.AGS_PROCESS_DUE_SCHEDULER_SECRET) {
+    return { ok: false, status: 503, error: "pact_scheduler_not_configured" };
+  }
+
+  const courseId = input.courseId || env.AGS_BACKFILL_COURSE_ID;
+  if (!courseId) {
+    return { ok: false, status: 503, error: "ags_backfill_course_not_configured" };
+  }
+
+  const baseUrl = env.PACT_API_BASE_URL.replace(/\/$/, "");
+  const limit = input.limit ?? clampLimit(env.AGS_BACKFILL_LIMIT, 100);
+  const body = {
+    courseId,
+    cohortId: input.cohortId || env.AGS_BACKFILL_COHORT_ID || undefined,
+    limit
+  };
+  const response = await fetch(`${baseUrl}/api/v1/ops/ags-publish-attempts/backfill-completed`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.AGS_PROCESS_DUE_SCHEDULER_SECRET}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+
+  let payload = undefined;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = undefined;
+  }
+
+  const data = payload?.data ?? payload;
+  const result = {
+    ok: response.ok,
+    status: response.status,
+    source: input.source,
+    courseId,
+    cohortId: body.cohortId,
+    scanned: data?.scanned,
+    published: data?.published,
+    queued: data?.queued,
+    skipped: data?.skipped,
+    failed: data?.failed,
+    remainingCandidates: data?.remainingCandidates
+  };
+
+  console.log(JSON.stringify({ event: "pact.ags_backfill_completed", ...result }));
   return result;
 }
 
