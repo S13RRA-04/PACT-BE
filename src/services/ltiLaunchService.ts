@@ -42,7 +42,7 @@ export class LtiLaunchService {
   private readonly sessions: SessionService;
 
   constructor(private readonly config: AppConfig, private readonly repository: PactRepository) {
-    this.jwks = createRemoteJWKSet(new URL(config.lmsPlatformJwksUri));
+    this.jwks = platformJwksFor(config.lmsPlatformJwksUri);
     this.sessions = new SessionService(config.pactSessionSecret);
   }
 
@@ -200,6 +200,16 @@ export class LtiLaunchService {
       || target.pathname === "/api/v1/lti/launch"
       || (this.config.pactAllowLegacyLtiPaths && target.pathname === "/lti/launch");
   }
+}
+
+const platformJwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+function platformJwksFor(jwksUri: string) {
+  const cached = platformJwksCache.get(jwksUri);
+  if (cached) return cached;
+  const jwks = createRemoteJWKSet(new URL(jwksUri));
+  platformJwksCache.set(jwksUri, jwks);
+  return jwks;
 }
 
 function launchScopeFromTargetLink(value: string | undefined): { contentType?: ContentType; contentId?: string } {

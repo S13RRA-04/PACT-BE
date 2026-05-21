@@ -1680,6 +1680,7 @@ function mechanicsMatchesContentType(type: ContentType, kind: ContentMechanics["
   if (type === "challenge") return kind === "challenge_path";
   if (type === "game") return kind === "packet_capture";
   if (type === "assessment") return kind === "readiness_checklist";
+  if (type === "capstone") return kind === "daily_progression_capstone";
   return false;
 }
 

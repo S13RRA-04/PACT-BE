@@ -1041,7 +1041,7 @@ export class PactService {
         progressPercent: attempt.progressPercent,
         agsAccessToken,
         comment: attempt.comment
-      }, attempt.maxScore);
+      }, attempt.maxScore, { lineItemUrl: attempt.lineItemUrl });
       await this.repository.updateAgsPublishAttemptOutcome({
         id: attempt.id,
         status: agsStatus,

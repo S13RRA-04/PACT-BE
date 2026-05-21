@@ -2659,6 +2659,79 @@ describe("PACT API", () => {
     }
   });
 
+  it("uses the queued attempt line item URL when retrying AGS publishes", async () => {
+    const db = await getMongoDb(config);
+    const now = new Date().toISOString();
+    await db.collection("test_pactUsers").insertOne({
+      id: "ags-attempt-lineitem-learner",
+      lmsUserId: "lms-ags-attempt-lineitem-learner",
+      role: "learner",
+      courseId: "pact-ags-attempt-lineitem",
+      cohortId: "cohort-a",
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactContent").insertOne({
+      ...publishedContent("ags-attempt-lineitem-content", "cohort-a", "learner", "published", "module"),
+      courseId: "pact-ags-attempt-lineitem"
+    });
+    await db.collection("test_pactAgsContexts").insertOne({
+      id: "ags-attempt-lineitem-context",
+      courseId: "pact-ags-attempt-lineitem",
+      cohortId: "cohort-a",
+      userId: "ags-attempt-lineitem-operator",
+      lineItemsUrl: "http://lms.example.test/api/v1/lti/ags/lineitems",
+      scopes: ["https://purl.imsglobal.org/spec/lti-ags/scope/score"],
+      createdAt: now,
+      updatedAt: now
+    });
+    await db.collection("test_pactAgsPublishAttempts").insertOne({
+      id: "ags-attempt-lineitem-due",
+      courseId: "pact-ags-attempt-lineitem",
+      cohortId: "cohort-a",
+      userId: "ags-attempt-lineitem-learner",
+      contentId: "ags-attempt-lineitem-content",
+      lineItemUrl: "http://lms.example.test/api/v1/lti/ags/lineitems/attempt-only-lineitem",
+      score: 9,
+      maxScore: 10,
+      progressPercent: 100,
+      status: "pending",
+      retryCount: 0,
+      nextRetryAt: new Date(Date.now() - 1000).toISOString(),
+      createdAt: now
+    });
+    const retryConfig = { ...config, agsAutoRetryEnabled: true, agsAutoRetryMaxAttempts: 2 };
+    const repository = new PactRepository(db, retryConfig);
+    const service = new AgsMaintenanceService(
+      retryConfig,
+      repository,
+      new PactService(repository, new LmsAgsClient(), new LmsTokenClient(retryConfig), retryConfig),
+      createLogger(retryConfig)
+    );
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ access_token: "attempt-lineitem-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    try {
+      const result = await service.retryDueAgsAttempts();
+
+      expect(result.scanned).toBeGreaterThanOrEqual(1);
+      expect(result.retried).toBeGreaterThanOrEqual(1);
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        "http://lms.example.test/api/v1/lti/ags/lineitems/attempt-only-lineitem/scores",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({ Authorization: "Bearer attempt-lineitem-token" })
+        })
+      );
+      await expect(db.collection("test_pactAgsPublishAttempts").findOne({ id: "ags-attempt-lineitem-due" }))
+        .resolves.toMatchObject({ status: "published", retryCount: 1 });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("lets instructors manually process due AGS queue attempts", async () => {
     const db = await getMongoDb(config);
     const now = new Date().toISOString();
